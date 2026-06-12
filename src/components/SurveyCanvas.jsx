@@ -34,16 +34,17 @@ export default function SurveyCanvas({
       script.onload = async () => {
         try {
           window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
-          const pdf = await window.pdfjsLib.getDocument(floorPlanUrl).promise
+         const pdf = await window.pdfjsLib.getDocument(floorPlanUrl).promise
           const page = await pdf.getPage(1)
           const wr = wrapRef.current.getBoundingClientRect()
           const vp0 = page.getViewport({ scale: 1 })
-          const scale = Math.min((wr.width - 4) / vp0.width, (wr.height - 4) / vp0.height)
+          const devicePixelRatio = window.devicePixelRatio || 1
+          const scale = Math.min((wr.width - 4) / vp0.width, (wr.height - 4) / vp0.height) * devicePixelRatio
           const vp = page.getViewport({ scale })
           canvas.width = Math.round(vp.width)
           canvas.height = Math.round(vp.height)
-          canvas.style.width = canvas.width + 'px'
-          canvas.style.height = canvas.height + 'px'
+          canvas.style.width = Math.round(vp.width / devicePixelRatio) + 'px'
+          canvas.style.height = Math.round(vp.height / devicePixelRatio) + 'px'
           await page.render({ canvasContext: ctx, viewport: vp }).promise
         } catch (err) {
           console.error('PDF render error:', err)
@@ -252,7 +253,7 @@ export default function SurveyCanvas({
       onDragOver={e => e.preventDefault()}
       onDrop={handleDrop}
     >
-      <canvas ref={fpCanvasRef} style={{ position: 'absolute', top: 0, left: 0, opacity: 0.4, pointerEvents: 'none' }} />
+<canvas ref={fpCanvasRef} style={{ position: 'absolute', top: 0, left: 0, opacity: 0.85, pointerEvents: 'none' }} />
       <canvas ref={hmCanvasRef} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }} />
 
       <svg ref={drawSvgRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
