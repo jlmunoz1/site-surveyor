@@ -308,7 +308,7 @@ export default function SurveyEditor() {
         <div style={{ width: '0.5px', height: 22, background: '#e0dfd8' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <i className="ti ti-layout-grid" style={{ fontSize: 13, color: '#888' }} />
-          <input type="range" min="20" max="80" step="2" value={iconSize}
+          <input type="range" min="10" max="80" step="2" value={iconSize}
             onChange={e => updateIconSize(parseInt(e.target.value))}
             style={{ width: 64 }} title="Icon size" />
           <span style={{ fontSize: 11, color: '#888', minWidth: 24 }}>{iconSize}px</span>
