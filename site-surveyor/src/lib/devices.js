@@ -17,11 +17,11 @@ export const DEVICE_DEFS = [
   {
     section: 'Network',
     items: [
-      { dtype: 'mdf',    label: 'MDF',         color: '#534AB7', coverage: 0, heatmap: false },
-      { dtype: 'idf',    label: 'IDF',         color: '#7F77DD', coverage: 0, heatmap: false },
-      { dtype: 'switch', label: 'PoE Switch',  color: '#3C3489', coverage: 0, heatmap: false },
-      { dtype: 'ap',     label: 'Access Point',color: '#534AB7', coverage: 80, heatmap: false },
-      { dtype: 'nvr',    label: 'NVR/DVR',     color: '#26215C', coverage: 0, heatmap: false },
+      { dtype: 'mdf',    label: 'MDF',          color: '#534AB7', coverage: 0, heatmap: false },
+      { dtype: 'idf',    label: 'IDF',          color: '#7F77DD', coverage: 0, heatmap: false },
+      { dtype: 'switch', label: 'PoE Switch',   color: '#3C3489', coverage: 0, heatmap: false },
+      { dtype: 'ap',     label: 'Access Point', color: '#534AB7', coverage: 80, heatmap: false },
+      { dtype: 'nvr',    label: 'NVR/DVR',      color: '#26215C', coverage: 0, heatmap: false },
     ]
   },
   {
@@ -46,7 +46,7 @@ export function getIconPaths(dtype, color) {
     'reolink-fe': `<circle cx="17" cy="17" r="14" fill="${c}18" stroke="${c}" stroke-width="2"/><circle cx="17" cy="17" r="8" fill="none" stroke="${c}" stroke-width="1.5"/><circle cx="17" cy="17" r="3" fill="${c}"/><line x1="17" y1="3" x2="17" y2="9" stroke="${c}" stroke-width="1.5"/><line x1="17" y1="25" x2="17" y2="31" stroke="${c}" stroke-width="1.5"/><line x1="3" y1="17" x2="9" y2="17" stroke="${c}" stroke-width="1.5"/><line x1="25" y1="17" x2="31" y2="17" stroke="${c}" stroke-width="1.5"/>`,
     'cam-dome':   `<path d="M6 22 Q6 8 17 8 Q28 8 28 22" fill="${c}18" stroke="${c}" stroke-width="2"/><rect x="7" y="21" width="20" height="6" rx="3" fill="${c}18" stroke="${c}" stroke-width="2"/><circle cx="17" cy="15" r="4" fill="${c}"/>`,
     'cam-bullet': `<rect x="4" y="12" width="20" height="10" rx="3" fill="${c}18" stroke="${c}" stroke-width="2"/><polygon points="24,12 30,17 24,22" fill="${c}"/><circle cx="12" cy="17" r="3" fill="${c}"/>`,
-    'rak-gw':     `<circle cx="17" cy="17" r="3" fill="${c}"/><line x1="17" y1="3" x2="17" y2="31" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="17" x2="31" y2="17" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><line x1="6.5" y1="6.5" x2="27.5" y2="27.5" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><line x1="27.5" y1="6.5" x2="6.5" y2="27.5" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><circle cx="17" cy="3" r="2" fill="${c}"/><circle cx="17" cy="31" r="2" fill="${c}"/><circle cx="3" cy="17" r="2" fill="${c}"/><circle cx="31" cy="17" r="2" fill="${c}"/><circle cx="6.5" cy="6.5" r="2" fill="${c}"/><circle cx="27.5" cy="27.5" r="2" fill="${c}"/><circle cx="27.5" cy="6.5" r="2" fill="${c}"/><circle cx="6.5" cy="27.5" r="2" fill="${c}"/>`,
+    'rak-gw':     `<circle cx="17" cy="17" r="3.5" fill="${c}"/><line x1="17" y1="3" x2="17" y2="31" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="17" x2="31" y2="17" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><line x1="6.5" y1="6.5" x2="27.5" y2="27.5" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><line x1="27.5" y1="6.5" x2="6.5" y2="27.5" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><circle cx="17" cy="3" r="2.2" fill="${c}"/><circle cx="17" cy="31" r="2.2" fill="${c}"/><circle cx="3" cy="17" r="2.2" fill="${c}"/><circle cx="31" cy="17" r="2.2" fill="${c}"/><circle cx="6.5" cy="6.5" r="2.2" fill="${c}"/><circle cx="27.5" cy="27.5" r="2.2" fill="${c}"/><circle cx="27.5" cy="6.5" r="2.2" fill="${c}"/><circle cx="6.5" cy="27.5" r="2.2" fill="${c}"/>`,
     'rak-node':   `<rect x="8" y="10" width="18" height="14" rx="2.5" fill="${c}18" stroke="${c}" stroke-width="2"/><line x1="17" y1="3" x2="17" y2="10" stroke="${c}" stroke-width="2"/><circle cx="17" cy="17" r="3" fill="${c}"/>`,
     'mdf':        `<rect x="3" y="7" width="28" height="20" rx="3" fill="${c}18" stroke="${c}" stroke-width="2"/><text x="17" y="21" text-anchor="middle" font-size="10" font-weight="700" fill="${c}" font-family="monospace">MDF</text>`,
     'idf':        `<rect x="3" y="7" width="28" height="20" rx="3" fill="${c}18" stroke="${c}" stroke-width="2"/><text x="17" y="21" text-anchor="middle" font-size="10" font-weight="700" fill="${c}" font-family="monospace">IDF</text>`,

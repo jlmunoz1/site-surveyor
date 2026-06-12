@@ -24,6 +24,8 @@ export default function SurveyEditor() {
   const [floorPlanRotation, setFloorPlanRotation] = useState(0)
   const [iconSize, setIconSize] = useState(38)
   const [exportingPDF, setExportingPDF] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
   const [calibrating, setCalibrating] = useState(false)
   const [calibratePoints, setCalibratePoints] = useState([])
   const [showCalibrateModal, setShowCalibrateModal] = useState(false)
@@ -86,9 +88,14 @@ export default function SurveyEditor() {
     updateDevices([...devices, d])
     setSelectedId(d.id); setSelectedCableId(null)
   }
-  function handleDeviceMove(devId, x, y) {
+  function handleDeviceMove(devId, x, y, newLabel) {
     setDevices(prev => {
-      const n = prev.map(d => d.id === devId ? { ...d, x, y } : d)
+      const n = prev.map(d => {
+        if (d.id !== devId) return d
+        const updated = { ...d, x, y }
+        if (newLabel !== undefined) updated.label = newLabel
+        return updated
+      })
       scheduleSave(n, cables, svgMarkup, pxPerFt)
       return n
     })
@@ -151,6 +158,14 @@ export default function SurveyEditor() {
     const newRotation = (floorPlanRotation + 90) % 360
     setFloorPlanRotation(newRotation)
     await saveSurvey(id, { floor_plan_rotation: newRotation })
+  }
+
+  async function handleRenameSurvey() {
+    if (!nameInput.trim() || nameInput.trim() === survey?.name) { setEditingName(false); return }
+    await saveSurvey(id, { name: nameInput.trim() })
+    setSurvey(s => ({ ...s, name: nameInput.trim() }))
+    setEditingName(false)
+    setSaveMsg('Renamed'); setTimeout(() => setSaveMsg(''), 2000)
   }
 
   function startCalibrate() {
@@ -241,7 +256,26 @@ export default function SurveyEditor() {
         <button onClick={() => navigate('/dashboard')} style={ghostBtn}>
           <i className="ti ti-arrow-left" /> Dashboard
         </button>
-        <span style={{ fontSize: 13, fontWeight: 500, color: '#1a1a18', marginLeft: 4 }}>{survey?.name}</span>
+        {editingName ? (
+          <input
+            autoFocus
+            value={nameInput}
+            onChange={e => setNameInput(e.target.value)}
+            onBlur={handleRenameSurvey}
+            onKeyDown={e => { if (e.key === 'Enter') handleRenameSurvey(); if (e.key === 'Escape') setEditingName(false) }}
+            style={{ fontSize: 13, fontWeight: 500, color: '#1a1a18', background: '#fff', border: '0.5px solid #378ADD', borderRadius: 6, padding: '3px 8px', outline: 'none', width: 220 }}
+          />
+        ) : (
+          <span
+            onClick={() => { setNameInput(survey?.name || ''); setEditingName(true) }}
+            title="Click to rename"
+            style={{ fontSize: 13, fontWeight: 500, color: '#1a1a18', marginLeft: 4, cursor: 'text', padding: '3px 6px', borderRadius: 6, border: '0.5px solid transparent' }}
+            onMouseEnter={e => e.target.style.borderColor = '#e0dfd8'}
+            onMouseLeave={e => e.target.style.borderColor = 'transparent'}
+          >
+            {survey?.name} <i className="ti ti-pencil" style={{ fontSize: 10, color: '#aaa', verticalAlign: '0px' }} />
+          </span>
+        )}
         {isShared && <span style={{ background: '#E24B4A', color: '#fff', fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 500 }}>Redline view</span>}
         <div style={{ width: '0.5px', height: 22, background: '#e0dfd8', margin: '0 2px' }} />
 

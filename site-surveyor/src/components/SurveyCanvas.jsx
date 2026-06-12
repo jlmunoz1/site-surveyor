@@ -424,7 +424,14 @@ export default function SurveyCanvas({
               }}>
                 <svg width={iconSize - 4} height={iconSize - 4} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
               </div>
-              <div style={{ fontSize: 10, color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 5px', borderRadius: 4, border: '0.5px solid #ddd', whiteSpace: 'nowrap', maxWidth: 84, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div
+                title="Double-click to rename"
+                onDoubleClick={e => {
+                  e.stopPropagation()
+                  const newLabel = prompt('Rename device:', d.label)
+                  if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
+                }}
+                style={{ fontSize: 10, color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 5px', borderRadius: 4, border: '0.5px solid #ddd', whiteSpace: 'nowrap', maxWidth: 84, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}>
                 {d.label}
               </div>
             </div>
