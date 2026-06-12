@@ -25,7 +25,7 @@ export default function SurveyCanvas({
     const canvas = fpCanvasRef.current
     const ctx = canvas.getContext('2d')
 
-    const isPDF = floorPlanUrl.includes('.pdf') || floorPlanUrl.includes('%2F') && !floorPlanUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)
+    const isPDF = floorPlanUrl.includes('.pdf') || (floorPlanUrl.includes('%2F') && !floorPlanUrl.match(/\.(jpg|jpeg|png|gif|webp)/i))
 
     if (isPDF) {
       // Use PDF.js for PDF files
