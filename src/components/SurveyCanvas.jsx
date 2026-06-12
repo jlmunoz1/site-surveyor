@@ -123,7 +123,7 @@ export default function SurveyCanvas({
       }
       img.src = floorPlanUrl
     }
-  }, [floorPlanUrl])
+ }, [floorPlanUrl, floorPlanRotation])
 
   // Heat map
   useEffect(() => {
