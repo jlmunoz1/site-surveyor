@@ -10,6 +10,7 @@ create table surveys (
   svg_markup text default '',
   px_per_ft numeric default 4,
   floor_plan_url text default '',
+  floor_plan_rotation integer default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -55,3 +56,6 @@ create policy "Anyone can view floor plans"
 create policy "Owners delete floor plans"
   on storage.objects for delete
   using (bucket_id = 'floor-plans' and auth.uid() is not null);
+
+-- Run this if you already created the table previously (adds rotation column)
+alter table surveys add column if not exists floor_plan_rotation integer default 0;

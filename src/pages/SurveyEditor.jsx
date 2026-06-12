@@ -21,6 +21,7 @@ export default function SurveyEditor() {
   const [svgMarkup, setSvgMarkup] = useState('')
   const [pxPerFt, setPxPerFt] = useState(4)
   const [floorPlanUrl, setFloorPlanUrl] = useState('')
+  const [floorPlanRotation, setFloorPlanRotation] = useState(0)
 
   const [mode, setMode] = useState(isShared ? 'redline' : 'select')
   const [activeCableType, setActiveCableType] = useState('cat6')
@@ -52,6 +53,7 @@ export default function SurveyEditor() {
     setPxPerFt(data.px_per_ft || 4)
     setScaleInput(String(data.px_per_ft || 4))
     setFloorPlanUrl(data.floor_plan_url || '')
+    setFloorPlanRotation(data.floor_plan_rotation || 0)
     setLoading(false)
   }
 
@@ -130,9 +132,16 @@ export default function SurveyEditor() {
   async function handleDeleteFloorPlan() {
     if (!window.confirm('Remove the floor plan from this survey?')) return
     setSaving(true)
-    await saveSurvey(id, { floor_plan_url: '' })
+    await saveSurvey(id, { floor_plan_url: '', floor_plan_rotation: 0 })
     setFloorPlanUrl('')
+    setFloorPlanRotation(0)
     setSaving(false); setSaveMsg('Floor plan removed'); setTimeout(() => setSaveMsg(''), 2000)
+  }
+
+  async function handleRotateFloorPlan() {
+    const newRotation = (floorPlanRotation + 90) % 360
+    setFloorPlanRotation(newRotation)
+    await saveSurvey(id, { floor_plan_rotation: newRotation })
   }
 
   async function handleShare() {
@@ -181,9 +190,14 @@ export default function SurveyEditor() {
               <i className="ti ti-upload" /> {floorPlanUrl ? 'Replace Plan' : 'Floor Plan'}
             </button>
             {floorPlanUrl && (
-              <button style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }} onClick={handleDeleteFloorPlan}>
-                <i className="ti ti-x" /> Remove Plan
-              </button>
+              <>
+                <button style={{ ...tbBtn, color: '#534AB7', borderColor: '#AFA9EC' }} onClick={handleRotateFloorPlan} title="Rotate 90° clockwise">
+                  <i className="ti ti-rotate-clockwise" /> Rotate {floorPlanRotation > 0 ? `(${floorPlanRotation}°)` : ''}
+                </button>
+                <button style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }} onClick={handleDeleteFloorPlan}>
+                  <i className="ti ti-x" /> Remove Plan
+                </button>
+              </>
             )}
             <input ref={fileInputRef} type="file" accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFloorPlanUpload} />
             <div style={{ width: '0.5px', height: 22, background: '#e0dfd8' }} />
@@ -277,6 +291,7 @@ export default function SurveyEditor() {
           onMarkupChange={updateMarkup}
           selectedId={selectedId} selectedCableId={selectedCableId}
           floorPlanUrl={floorPlanUrl}
+          floorPlanRotation={floorPlanRotation}
         />
 
         <div style={{ width: 172, flexShrink: 0, background: '#f8f8f6', borderLeft: '0.5px solid #e0dfd8', padding: 12, overflowY: 'auto' }}>

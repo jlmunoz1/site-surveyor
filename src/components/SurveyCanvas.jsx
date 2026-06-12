@@ -9,6 +9,7 @@ export default function SurveyCanvas({
   onMarkupChange,
   selectedId, selectedCableId,
   floorPlanUrl,
+  floorPlanRotation = 0,
 }) {
   const wrapRef = useRef(null)
   const fpCanvasRef = useRef(null)
@@ -71,6 +72,23 @@ export default function SurveyCanvas({
           canvas.style.width = Math.round(canvas.width * displayScale) + 'px'
           canvas.style.height = Math.round(canvas.height * displayScale) + 'px'
           await page.render({ canvasContext: ctx, viewport: vp }).promise
+          // Apply rotation if needed
+          const rot = floorPlanRotation || 0
+          if (rot !== 0) {
+            const isRotated90 = rot === 90 || rot === 270
+            const offscreen = document.createElement('canvas')
+            offscreen.width = isRotated90 ? canvas.height : canvas.width
+            offscreen.height = isRotated90 ? canvas.width : canvas.height
+            const octx = offscreen.getContext('2d')
+            octx.translate(offscreen.width / 2, offscreen.height / 2)
+            octx.rotate((rot * Math.PI) / 180)
+            octx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2)
+            canvas.width = offscreen.width
+            canvas.height = offscreen.height
+            canvas.style.width = Math.round(canvas.width * displayScale) + 'px'
+            canvas.style.height = Math.round(canvas.height * displayScale) + 'px'
+            ctx.drawImage(offscreen, 0, 0)
+          }
         } catch (err) { console.error('PDF render error:', err) }
       }
       loadPDF()
@@ -79,12 +97,22 @@ export default function SurveyCanvas({
       img.crossOrigin = 'anonymous'
       const draw = (image) => {
         const wr = wrapRef.current.getBoundingClientRect()
-        const scale = Math.min(wr.width / image.naturalWidth, wr.height / image.naturalHeight, 1) * 2
-        canvas.width = Math.round(image.naturalWidth * scale)
-        canvas.height = Math.round(image.naturalHeight * scale)
+        const rot = floorPlanRotation || 0
+        const isRotated90 = rot === 90 || rot === 270
+        const srcW = image.naturalWidth, srcH = image.naturalHeight
+        const displayW = isRotated90 ? srcH : srcW
+        const displayH = isRotated90 ? srcW : srcH
+        const scale = Math.min(wr.width / displayW, wr.height / displayH, 1) * 2
+        canvas.width = Math.round(displayW * scale)
+        canvas.height = Math.round(displayH * scale)
         canvas.style.width = Math.round(canvas.width / 2) + 'px'
         canvas.style.height = Math.round(canvas.height / 2) + 'px'
-        ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+        const rad = (rot * Math.PI) / 180
+        ctx.save()
+        ctx.translate(canvas.width / 2, canvas.height / 2)
+        ctx.rotate(rad)
+        ctx.drawImage(image, -srcW * scale / 2, -srcH * scale / 2, srcW * scale, srcH * scale)
+        ctx.restore()
       }
       img.onload = () => draw(img)
       img.onerror = () => {
