@@ -19,38 +19,43 @@ export default function SurveyCanvas({
   const [drawStart, setDrawStart] = useState(null)
   const [drawEl, setDrawEl] = useState(null)
 
-  // Load floor plan image/PDF URL
- useEffect(() => {
+  // Load floor plan from URL (image or PDF via PDF.js)
+  useEffect(() => {
     if (!floorPlanUrl || !fpCanvasRef.current || !wrapRef.current) return
     const canvas = fpCanvasRef.current
     const ctx = canvas.getContext('2d')
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      const wr = wrapRef.current.getBoundingClientRect()
-      const scale = Math.min(wr.width / img.naturalWidth, wr.height / img.naturalHeight, 1)
-      canvas.width = Math.round(img.naturalWidth * scale)
-      canvas.height = Math.round(img.naturalHeight * scale)
-      canvas.style.width = canvas.width + 'px'
-      canvas.style.height = canvas.height + 'px'
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-    }
-    img.onerror = () => {
-      const proxyUrl = floorPlanUrl.replace('https://', 'https://images.weserv.nl/?url=')
-      const img2 = new Image()
-      img2.onload = () => {
-        const wr = wrapRef.current.getBoundingClientRect()
-        const scale = Math.min(wr.width / img2.naturalWidth, wr.height / img2.naturalHeight, 1)
-        canvas.width = Math.round(img2.naturalWidth * scale)
-        canvas.height = Math.round(img2.naturalHeight * scale)
-        canvas.style.width = canvas.width + 'px'
-        canvas.style.height = canvas.height + 'px'
-        ctx.drawImage(img2, 0, 0, canvas.width, canvas.height)
+
+    const isPDF = floorPlanUrl.includes('.pdf') || floorPlanUrl.includes('%2F') && !floorPlanUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)
+
+    if (isPDF) {
+      // Use PDF.js for PDF files
+      const script = document.createElement('script')
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+      script.onload = async () => {
+        try {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+          const pdf = await window.pdfjsLib.getDocument(floorPlanUrl).promise
+          const page = await pdf.getPage(1)
+          const wr = wrapRef.current.getBoundingClientRect()
+          const vp0 = page.getViewport({ scale: 1 })
+          const scale = Math.min((wr.width - 4) / vp0.width, (wr.height - 4) / vp0.height)
+          const vp = page.getViewport({ scale })
+          canvas.width = Math.round(vp.width)
+          canvas.height = Math.round(vp.height)
+          canvas.style.width = canvas.width + 'px'
+          canvas.style.height = canvas.height + 'px'
+          await page.render({ canvasContext: ctx, viewport: vp }).promise
+        } catch (err) {
+          console.error('PDF render error:', err)
+        }
       }
-      img2.src = proxyUrl
-    }
-    img.src = floorPlanUrl
-  }, [floorPlanUrl])
+      if (!window.pdfjsLib) {
+        document.head.appendChild(script)
+      } else {
+        script.onload()
+      }
+    } else {
+      // Regular image
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.onload = () => {
@@ -61,6 +66,20 @@ export default function SurveyCanvas({
         canvas.style.width = canvas.width + 'px'
         canvas.style.height = canvas.height + 'px'
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      }
+      img.onerror = () => {
+        // Retry without crossOrigin if CORS fails
+        const img2 = new Image()
+        img2.onload = () => {
+          const wr = wrapRef.current.getBoundingClientRect()
+          const scale = Math.min(wr.width / img2.naturalWidth, wr.height / img2.naturalHeight, 1)
+          canvas.width = Math.round(img2.naturalWidth * scale)
+          canvas.height = Math.round(img2.naturalHeight * scale)
+          canvas.style.width = canvas.width + 'px'
+          canvas.style.height = canvas.height + 'px'
+          ctx.drawImage(img2, 0, 0, canvas.width, canvas.height)
+        }
+        img2.src = floorPlanUrl
       }
       img.src = floorPlanUrl
     }
@@ -106,7 +125,7 @@ export default function SurveyCanvas({
     ctx.drawImage(blur, 0, 0)
   }, [devices, showHeatmap, pxPerFt])
 
-  // Restore SVG markup (redlines, walls, rooms, labels)
+  // Restore SVG markup on mount only
   useEffect(() => {
     if (drawSvgRef.current && svgMarkup !== undefined) {
       drawSvgRef.current.innerHTML = svgMarkup
