@@ -76,7 +76,7 @@ export async function deleteSurvey(id) {
 export async function uploadFloorPlan(surveyId, file) {
   const ext = file.name.split('.').pop()
   const path = `${surveyId}/floor-plan.${ext}`
-  const { data, error } = await supabase.storage
+  const { error } = await supabase.storage
     .from('floor-plans')
     .upload(path, file, { upsert: true })
   if (error) return { url: null, error }

@@ -85,7 +85,7 @@ export default function SurveyCanvas({
     if (drawSvgRef.current && svgMarkup !== undefined) {
       drawSvgRef.current.innerHTML = svgMarkup
     }
-  }, []) // only on mount
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const getSVGMarkup = useCallback(() => {
     return drawSvgRef.current ? drawSvgRef.current.innerHTML : ''

@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
 import { getSurvey, getSurveyByToken, saveSurvey, uploadFloorPlan, createShareToken } from '../lib/supabase'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon } from '../lib/devices'
@@ -8,7 +7,6 @@ import { v4 as uuidv4 } from 'uuid'
 
 export default function SurveyEditor() {
   const { id, token } = useParams()
-  const { user } = useAuth()
   const navigate = useNavigate()
   const isShared = Boolean(token)
 
@@ -41,7 +39,7 @@ export default function SurveyEditor() {
 
   useEffect(() => {
     loadSurvey()
-  }, [id, token])
+  }, [id, token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadSurvey() {
     setLoading(true)

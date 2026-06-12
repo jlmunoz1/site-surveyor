@@ -15,7 +15,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (user) loadSurveys()
-  }, [user])
+  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadSurveys() {
     setLoading(true)
