@@ -11,6 +11,9 @@ export default function SurveyCanvas({
   floorPlanUrl,
   floorPlanRotation = 0,
   iconSize = 38,
+  calibrating = false,
+  calibratePoints = [],
+  onCalibratePoint,
 }) {
   const wrapRef = useRef(null)
   const fpCanvasRef = useRef(null)
@@ -123,7 +126,7 @@ export default function SurveyCanvas({
       }
       img.src = floorPlanUrl
     }
- }, [floorPlanUrl, floorPlanRotation])
+  }, [floorPlanUrl, floorPlanRotation])
 
   // Heat map
   useEffect(() => {
@@ -211,6 +214,14 @@ export default function SurveyCanvas({
 
   function handleWrapMouseDown(e) {
     if (e.target.closest('.sv-device')) return
+
+    // Calibration mode — capture two points
+    if (calibrating && onCalibratePoint && e.button === 0) {
+      const { x, y } = toCanvas(e.clientX, e.clientY)
+      onCalibratePoint(x, y)
+      return
+    }
+
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       e.preventDefault()
       isPanning.current = true
@@ -419,6 +430,24 @@ export default function SurveyCanvas({
             </div>
           ))}
         </div>
+
+        {/* Calibration overlay */}
+        {(calibrating || calibratePoints.length > 0) && (
+          <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', pointerEvents: 'none', zIndex: 20 }}>
+            <svg style={{ overflow: 'visible', position: 'absolute', top: 0, left: 0 }}>
+              {calibratePoints.length >= 1 && (
+                <circle cx={calibratePoints[0].x} cy={calibratePoints[0].y} r={6 / zoom} fill="#E24B4A" stroke="#fff" strokeWidth={2 / zoom} />
+              )}
+              {calibratePoints.length >= 2 && (
+                <>
+                  <line x1={calibratePoints[0].x} y1={calibratePoints[0].y} x2={calibratePoints[1].x} y2={calibratePoints[1].y}
+                    stroke="#E24B4A" strokeWidth={2 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`} />
+                  <circle cx={calibratePoints[1].x} cy={calibratePoints[1].y} r={6 / zoom} fill="#E24B4A" stroke="#fff" strokeWidth={2 / zoom} />
+                </>
+              )}
+            </svg>
+          </div>
+        )}
 
         {/* Heat map outside zoom layer - always fills viewport */}
         <canvas ref={hmCanvasRef} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', opacity: 0.85 }} />

@@ -24,6 +24,11 @@ export default function SurveyEditor() {
   const [floorPlanRotation, setFloorPlanRotation] = useState(0)
   const [iconSize, setIconSize] = useState(38)
   const [exportingPDF, setExportingPDF] = useState(false)
+  const [calibrating, setCalibrating] = useState(false)
+  const [calibratePoints, setCalibratePoints] = useState([])
+  const [showCalibrateModal, setShowCalibrateModal] = useState(false)
+  const [calibrateDistance, setCalibrateDistance] = useState('')
+  const [calibratePixels, setCalibratePixels] = useState(0)
 
   const [mode, setMode] = useState(isShared ? 'redline' : 'select')
   const [activeCableType, setActiveCableType] = useState('cat6')
@@ -148,6 +153,37 @@ export default function SurveyEditor() {
     await saveSurvey(id, { floor_plan_rotation: newRotation })
   }
 
+  function startCalibrate() {
+    setCalibrating(true)
+    setCalibratePoints([])
+    setMode('select')
+  }
+
+  function handleCalibratePoint(x, y) {
+    const pts = [...calibratePoints, { x, y }]
+    setCalibratePoints(pts)
+    if (pts.length === 2) {
+      const dx = pts[1].x - pts[0].x
+      const dy = pts[1].y - pts[0].y
+      const pixelDist = Math.round(Math.sqrt(dx * dx + dy * dy))
+      setCalibratePixels(pixelDist)
+      setShowCalibrateModal(true)
+      setCalibrating(false)
+    }
+  }
+
+  function applyCalibration() {
+    const ft = parseFloat(calibrateDistance)
+    if (!ft || ft <= 0 || calibratePixels <= 0) return
+    const newScale = parseFloat((calibratePixels / ft).toFixed(2))
+    updateScale(newScale)
+    setScaleInput(String(newScale))
+    setShowCalibrateModal(false)
+    setCalibratePoints([])
+    setCalibrateDistance('')
+    setSaveMsg('Scale set: ' + newScale + ' px/ft'); setTimeout(() => setSaveMsg(''), 3000)
+  }
+
   async function handleExportPDF() {
     setExportingPDF(true)
     try {
@@ -250,7 +286,14 @@ export default function SurveyEditor() {
           onClick={() => setShowHeatmap(h => !h)}>
           <i className="ti ti-wave-sine" /> Heat Map
         </button>
-        <button style={tbBtn} onClick={() => setShowScale(true)}><i className="ti ti-ruler" /> Scale</button>
+        <button style={{ ...tbBtn, ...(calibrating ? { color: '#E24B4A', borderColor: '#E24B4A', background: '#FCEBEB' } : {}) }}
+          onClick={() => calibrating ? setCalibrating(false) : startCalibrate()}
+          title="Click two points on the floor plan to set the scale">
+          <i className="ti ti-ruler-measure" /> {calibrating ? 'Click 2 pts…' : 'Set Scale'}
+        </button>
+        <button style={tbBtn} onClick={() => setShowScale(true)} title="Manually enter px/ft">
+          <i className="ti ti-adjustments" /> {pxPerFt} px/ft
+        </button>
         {!isShared && <button style={tbBtn} onClick={() => setShowBOM(true)}><i className="ti ti-clipboard-list" /> BOM</button>}
         {!isShared && (
           <button style={{ ...tbBtn, color: '#185FA5', borderColor: '#185FA5' }} onClick={handleShare}>
@@ -331,6 +374,9 @@ export default function SurveyEditor() {
           floorPlanUrl={floorPlanUrl}
           floorPlanRotation={floorPlanRotation}
           iconSize={iconSize}
+          calibrating={calibrating}
+          calibratePoints={calibratePoints}
+          onCalibratePoint={handleCalibratePoint}
         />
 
         <div style={{ width: 172, flexShrink: 0, background: '#f8f8f6', borderLeft: '0.5px solid #e0dfd8', padding: 12, overflowY: 'auto' }}>
@@ -425,6 +471,36 @@ export default function SurveyEditor() {
         <span style={{ marginLeft: 'auto' }}>Mode: {mode}</span>
         {floorPlanUrl && <span style={{ color: '#1D9E75' }}>✓ Floor plan loaded</span>}
       </div>
+
+      {showCalibrateModal && (
+        <Modal onClose={() => { setShowCalibrateModal(false); setCalibratePoints([]) }}>
+          <h3 style={modalTitle}>Set scale from measurement</h3>
+          <p style={{ fontSize: 12, color: '#666', marginBottom: 14, lineHeight: 1.5 }}>
+            You clicked two points that are <strong>{calibratePixels} pixels</strong> apart on screen.<br/>
+            Enter the real-world distance between those two points.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <input type="number" min="1" step="0.5" value={calibrateDistance}
+              onChange={e => setCalibrateDistance(e.target.value)}
+              placeholder="e.g. 20"
+              autoFocus
+              style={{ width: 90, padding: '7px 10px', fontSize: 14, border: '0.5px solid #ccc', borderRadius: 8, outline: 'none' }} />
+            <span style={{ fontSize: 13, color: '#666' }}>feet</span>
+          </div>
+          {calibrateDistance && parseFloat(calibrateDistance) > 0 && (
+            <p style={{ fontSize: 11, color: '#1D9E75', marginBottom: 12 }}>
+              → Scale will be set to {parseFloat((calibratePixels / parseFloat(calibrateDistance)).toFixed(2))} px/ft
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={{ ...primaryBtn, background: '#EAF3DE', color: '#3B6D11', border: '0.5px solid #97C459' }}
+              onClick={applyCalibration} disabled={!calibrateDistance || parseFloat(calibrateDistance) <= 0}>
+              Apply scale
+            </button>
+            <button style={ghostBtn} onClick={() => { setShowCalibrateModal(false); setCalibratePoints([]) }}>Cancel</button>
+          </div>
+        </Modal>
+      )}
 
       {showScale && (
         <Modal onClose={() => setShowScale(false)}>
