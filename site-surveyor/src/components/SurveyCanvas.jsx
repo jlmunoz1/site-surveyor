@@ -10,7 +10,7 @@ export default function SurveyCanvas({
   selectedId, selectedCableId,
   floorPlanUrl,
   floorPlanRotation = 0,
-  iconSize = 38,
+  iconSizes = { cameras: 16, lora: 20, network: 20, access: 16 },
   calibrating = false,
   calibratePoints = [],
   onCalibratePoint,
@@ -363,6 +363,14 @@ export default function SurveyCanvas({
     setZoom(1); setPan({ x: 0, y: 0 })
   }
 
+  function getSizeForDevice(dtype) {
+    if (['reolink-fe','cam-dome','cam-bullet'].includes(dtype)) return iconSizes.cameras || 16
+    if (['rak-gw','rak-node'].includes(dtype)) return iconSizes.lora || 20
+    if (['mdf','idf','switch','ap','nvr'].includes(dtype)) return iconSizes.network || 20
+    if (['reader','intercom'].includes(dtype)) return iconSizes.access || 16
+    return 16
+  }
+
   const transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
 
   return (
@@ -373,14 +381,14 @@ export default function SurveyCanvas({
         <button onClick={resetView} style={{ ...zoomBtn, fontSize: 11 }}>⌂</button>
       </div>
       <div style={{ position: 'absolute', bottom: 12, left: 12, zIndex: 10, fontSize: 10, color: '#888', background: 'rgba(255,255,255,0.85)', padding: '2px 7px', borderRadius: 4, pointerEvents: 'none' }}>
-        {Math.round(zoom * 100)}% · scroll to zoom · alt+drag to pan
+        {Math.round(zoom * 100)}% · scroll to zoom · drag to pan
       </div>
 
       <div
         ref={wrapRef}
         style={{
           width: '100%', height: '100%', position: 'relative', overflow: 'hidden',
-          cursor: isPanning.current ? 'grabbing' : mode === 'select' ? 'default' : 'crosshair',
+          cursor: isPanning.current ? 'grabbing' : mode === 'select' ? 'grab' : 'crosshair',
           background: 'repeating-linear-gradient(0deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px),repeating-linear-gradient(90deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px)'
         }}
         data-export-canvas="true"
@@ -417,25 +425,33 @@ export default function SurveyCanvas({
           {devices.map(d => (
             <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
               style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-              <div style={{
-                width: iconSize, height: iconSize, borderRadius: Math.round(iconSize * 0.21), display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: d.color + '15', border: selectedId === d.id ? `2px solid ${d.color}` : '2px solid transparent',
-                boxShadow: selectedId === d.id ? `0 0 0 3px ${d.color}22` : 'none'
-              }}>
-                <svg width={Math.max(6, iconSize - 4)} height={Math.max(6, iconSize - 4)} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
-              </div>
-              {iconSize >= 20 && (
-              <div
-                title="Double-click to rename"
-                onDoubleClick={e => {
-                  e.stopPropagation()
-                  const newLabel = prompt('Rename device:', d.label)
-                  if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
-                }}
-                style={{ fontSize: Math.max(8, Math.round(iconSize * 0.26)), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', maxWidth: iconSize * 2.2, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}>
-                {d.label}
-              </div>
-            )}
+              {(() => {
+                const sz = getSizeForDevice(d.dtype)
+                return (
+                  <>
+                    <div style={{
+                      width: sz, height: sz, borderRadius: Math.round(sz * 0.25), display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: sz > 8 ? d.color + '15' : 'transparent',
+                      border: selectedId === d.id ? `${Math.max(1, Math.round(sz * 0.06))}px solid ${d.color}` : `${Math.max(1, Math.round(sz * 0.06))}px solid transparent`,
+                      boxShadow: selectedId === d.id ? `0 0 0 2px ${d.color}33` : 'none'
+                    }}>
+                      <svg width={sz} height={sz} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
+                    </div>
+                    {sz >= 14 && (
+                      <div
+                        title="Double-click to rename"
+                        onDoubleClick={e => {
+                          e.stopPropagation()
+                          const newLabel = prompt('Rename device:', d.label)
+                          if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
+                        }}
+                        style={{ fontSize: Math.max(7, Math.round(sz * 0.3)), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', maxWidth: sz * 2.5, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}>
+                        {d.label}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
             </div>
           ))}
         </div>

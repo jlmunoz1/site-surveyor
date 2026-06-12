@@ -83,3 +83,6 @@ create policy "Users manage own projects"
 alter table surveys add column if not exists project_id uuid references projects(id) on delete set null;
 alter table surveys add column if not exists icon_size integer default 38;
 alter table surveys add column if not exists floor_plan_rotation integer default 0;
+
+-- Add icon_sizes column (JSON object per category)
+alter table surveys add column if not exists icon_sizes jsonb default '{"cameras":16,"lora":20,"network":20,"access":16}';

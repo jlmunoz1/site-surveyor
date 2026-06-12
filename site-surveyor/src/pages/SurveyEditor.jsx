@@ -22,7 +22,12 @@ export default function SurveyEditor() {
   const [pxPerFt, setPxPerFt] = useState(4)
   const [floorPlanUrl, setFloorPlanUrl] = useState('')
   const [floorPlanRotation, setFloorPlanRotation] = useState(0)
-  const [iconSize, setIconSize] = useState(38)
+  const [iconSizes, setIconSizes] = useState({
+    cameras: 16,
+    lora: 20,
+    network: 20,
+    access: 16,
+  })
   const [exportingPDF, setExportingPDF] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
@@ -63,7 +68,9 @@ export default function SurveyEditor() {
     setScaleInput(String(data.px_per_ft || 4))
     setFloorPlanUrl(data.floor_plan_url || '')
     setFloorPlanRotation(data.floor_plan_rotation || 0)
-    setIconSize(data.icon_size != null ? data.icon_size : 38)
+    if (data.icon_sizes) {
+      setIconSizes(typeof data.icon_sizes === 'object' ? data.icon_sizes : {cameras:16,lora:20,network:20,access:16})
+    }
     setLoading(false)
   }
 
@@ -81,7 +88,12 @@ export default function SurveyEditor() {
   function updateCables(newCabs) { setCables(newCabs); scheduleSave(devices, newCabs, svgMarkup, pxPerFt) }
   function updateMarkup(m) { setSvgMarkup(m); scheduleSave(devices, cables, m, pxPerFt) }
   function updateScale(s) { setPxPerFt(s); scheduleSave(devices, cables, svgMarkup, s) }
-  function updateIconSize(s) { const v = Math.max(10, s); setIconSize(v); saveSurvey(id, { icon_size: v }) }
+  function updateIconSize(category, s) {
+    const v = Math.max(4, Math.min(80, s))
+    const newSizes = { ...iconSizes, [category]: v }
+    setIconSizes(newSizes)
+    saveSurvey(id, { icon_sizes: newSizes })
+  }
 
   function handleDeviceAdd(data) {
     const d = { ...data, id: uuidv4(), model: '', ip: '', notes: '', cost: 0, qty: 1 }
@@ -340,12 +352,24 @@ export default function SurveyEditor() {
           </button>
         )}
         <div style={{ width: '0.5px', height: 22, background: '#e0dfd8' }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <i className="ti ti-layout-grid" style={{ fontSize: 13, color: '#888' }} />
-          <input type="range" min="10" max="80" step="2" value={iconSize}
-            onChange={e => updateIconSize(parseInt(e.target.value))}
-            style={{ width: 64 }} title="Icon size" />
-          <span style={{ fontSize: 11, color: '#888', minWidth: 24 }}>{iconSize}px</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {[
+            { key: 'cameras', label: 'Cam' },
+            { key: 'lora',    label: 'LoRa' },
+            { key: 'network', label: 'Net' },
+            { key: 'access',  label: 'Access' },
+          ].map(({ key, label }) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 10, color: '#888', minWidth: 32 }}>{label}</span>
+              <input type="range" min="4" max="60" step="2"
+                value={iconSizes[key] || 16}
+                onChange={e => { const v = parseInt(e.target.value); setIconSizes(s => ({...s, [key]: v})) }}
+                onMouseUp={e => updateIconSize(key, parseInt(e.target.value))}
+                onTouchEnd={e => updateIconSize(key, parseInt(e.target.value))}
+                style={{ width: 52 }} title={label + ' icon size'} />
+              <span style={{ fontSize: 10, color: '#888', minWidth: 20 }}>{iconSizes[key] || 16}</span>
+            </div>
+          ))}
         </div>
 
         <span style={{ marginLeft: 'auto', fontSize: 11, color: saving ? '#BA7517' : '#1D9E75' }}>
@@ -407,7 +431,7 @@ export default function SurveyEditor() {
           selectedId={selectedId} selectedCableId={selectedCableId}
           floorPlanUrl={floorPlanUrl}
           floorPlanRotation={floorPlanRotation}
-          iconSize={iconSize}
+          iconSizes={iconSizes}
           calibrating={calibrating}
           calibratePoints={calibratePoints}
           onCalibratePoint={handleCalibratePoint}

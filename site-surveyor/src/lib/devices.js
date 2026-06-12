@@ -44,20 +44,17 @@ export function getIconPaths(dtype, color) {
   const c = color
 
   // RAK Gateway — 8-pointed snowflake/asterisk (4 axes + dot tips)
+  // 8-petal flower matching Sage logo style — rounded oval petals radiating from center
   const rakSnowflake = [
+    `<ellipse cx="17" cy="9" rx="3.8" ry="7" fill="${c}" transform="rotate(0 17 17)"/>`,
+    `<ellipse cx="17" cy="9" rx="3.8" ry="7" fill="${c}" transform="rotate(45 17 17)"/>`,
+    `<ellipse cx="17" cy="9" rx="3.8" ry="7" fill="${c}" transform="rotate(90 17 17)"/>`,
+    `<ellipse cx="17" cy="9" rx="3.8" ry="7" fill="${c}" transform="rotate(135 17 17)"/>`,
+    `<ellipse cx="17" cy="9" rx="3.8" ry="7" fill="${c}" transform="rotate(180 17 17)"/>`,
+    `<ellipse cx="17" cy="9" rx="3.8" ry="7" fill="${c}" transform="rotate(225 17 17)"/>`,
+    `<ellipse cx="17" cy="9" rx="3.8" ry="7" fill="${c}" transform="rotate(270 17 17)"/>`,
+    `<ellipse cx="17" cy="9" rx="3.8" ry="7" fill="${c}" transform="rotate(315 17 17)"/>`,
     `<circle cx="17" cy="17" r="3.5" fill="${c}"/>`,
-    `<line x1="17" y1="3" x2="17" y2="31" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>`,
-    `<line x1="3" y1="17" x2="31" y2="17" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>`,
-    `<line x1="6.5" y1="6.5" x2="27.5" y2="27.5" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>`,
-    `<line x1="27.5" y1="6.5" x2="6.5" y2="27.5" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>`,
-    `<circle cx="17" cy="3"    r="2.2" fill="${c}"/>`,
-    `<circle cx="17" cy="31"   r="2.2" fill="${c}"/>`,
-    `<circle cx="3"  cy="17"   r="2.2" fill="${c}"/>`,
-    `<circle cx="31" cy="17"   r="2.2" fill="${c}"/>`,
-    `<circle cx="6.5"  cy="6.5"  r="2.2" fill="${c}"/>`,
-    `<circle cx="27.5" cy="27.5" r="2.2" fill="${c}"/>`,
-    `<circle cx="27.5" cy="6.5"  r="2.2" fill="${c}"/>`,
-    `<circle cx="6.5"  cy="27.5" r="2.2" fill="${c}"/>`,
   ].join('')
 
   const icons = {
