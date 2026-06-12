@@ -63,7 +63,7 @@ export default function SurveyEditor() {
     setScaleInput(String(data.px_per_ft || 4))
     setFloorPlanUrl(data.floor_plan_url || '')
     setFloorPlanRotation(data.floor_plan_rotation || 0)
-    setIconSize(data.icon_size || 38)
+    setIconSize(data.icon_size != null ? data.icon_size : 38)
     setLoading(false)
   }
 
@@ -81,7 +81,7 @@ export default function SurveyEditor() {
   function updateCables(newCabs) { setCables(newCabs); scheduleSave(devices, newCabs, svgMarkup, pxPerFt) }
   function updateMarkup(m) { setSvgMarkup(m); scheduleSave(devices, cables, m, pxPerFt) }
   function updateScale(s) { setPxPerFt(s); scheduleSave(devices, cables, svgMarkup, s) }
-  function updateIconSize(s) { setIconSize(s); saveSurvey(id, { icon_size: s }) }
+  function updateIconSize(s) { const v = Math.max(10, s); setIconSize(v); saveSurvey(id, { icon_size: v }) }
 
   function handleDeviceAdd(data) {
     const d = { ...data, id: uuidv4(), model: '', ip: '', notes: '', cost: 0, qty: 1 }

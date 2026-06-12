@@ -422,7 +422,7 @@ export default function SurveyCanvas({
                 background: d.color + '15', border: selectedId === d.id ? `2px solid ${d.color}` : '2px solid transparent',
                 boxShadow: selectedId === d.id ? `0 0 0 3px ${d.color}22` : 'none'
               }}>
-                <svg width={iconSize - 4} height={iconSize - 4} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
+                <svg width={Math.max(6, iconSize - 4)} height={Math.max(6, iconSize - 4)} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
               </div>
               {iconSize >= 20 && (
               <div
