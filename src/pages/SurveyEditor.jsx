@@ -412,21 +412,26 @@ export default function SurveyEditor() {
                 <>
                   <div>
                     <label style={propLabel}>LoRa range: <strong>{selectedDevice.hmRangeFt || 150} ft</strong></label>
-                    <input type="range" min="25" max="300" step="5" style={{ width: '100%' }}
+                    <input type="range" min="25" max="400" step="5" style={{ width: '100%' }}
                       value={selectedDevice.hmRangeFt || 150}
                       onChange={e => updateSelectedDevice('hmRangeFt', parseInt(e.target.value))} />
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#888' }}>
-                      <span>25 ft</span><span>300 ft</span>
+                      <span>25 ft</span><span>400 ft</span>
                     </div>
                   </div>
                   <div>
                     <label style={propLabel}>Signal strength</label>
                     <select style={propInput} value={selectedDevice.hmStrength || 1}
                       onChange={e => updateSelectedDevice('hmStrength', parseFloat(e.target.value))}>
-                      <option value="1">Strong (open)</option>
-                      <option value="0.75">Medium</option>
-                      <option value="0.5">Weak (walls)</option>
+                      <option value="1">Strong — open floor / warehouse</option>
+                      <option value="0.75">Medium — office / drywall</option>
+                      <option value="0.5">Weak — concrete / CMU / hospital</option>
                     </select>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#888', lineHeight: 1.5, background: '#f8f8f6', padding: '6px 8px', borderRadius: 6, border: '0.5px solid #e0dfd8' }}>
+                    <strong style={{ color: '#666' }}>Estimated indoor radius</strong><br/>
+                    Based on typical LoRaWAN indoor performance. Actual range varies with construction, antenna placement, and interference.<br/>
+                    Use "Set Scale" to calibrate ft to your floor plan.
                   </div>
                 </>
               )}

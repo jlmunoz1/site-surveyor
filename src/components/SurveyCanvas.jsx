@@ -331,7 +331,7 @@ export default function SurveyCanvas({
     if (!raw) return
     const data = JSON.parse(raw)
     const { x, y } = toCanvas(e.clientX, e.clientY)
-    onDeviceAdd({ ...data, x: x - 19, y: y - 19, hmRangeFt: 150, hmStrength: 1 })
+    onDeviceAdd({ ...data, x: x - 19, y: y - 19, hmRangeFt: 120, hmStrength: 0.75 })
   }
 
   function zoomIn() {
