@@ -31,10 +31,10 @@ export async function getSession() {
 }
 
 // Survey helpers
-export async function createSurvey(userId, name) {
+export async function createSurvey(userId, name, projectId = null) {
   const { data, error } = await supabase
     .from('surveys')
-    .insert({ user_id: userId, name, devices: [], cables: [], svg_markup: '', px_per_ft: 4 })
+    .insert({ user_id: userId, name, project_id: projectId, devices: [], cables: [], svg_markup: '', px_per_ft: 4, icon_size: 38, floor_plan_rotation: 0 })
     .select()
     .single()
   return { data, error }

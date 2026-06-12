@@ -22,6 +22,8 @@ export default function SurveyEditor() {
   const [pxPerFt, setPxPerFt] = useState(4)
   const [floorPlanUrl, setFloorPlanUrl] = useState('')
   const [floorPlanRotation, setFloorPlanRotation] = useState(0)
+  const [iconSize, setIconSize] = useState(38)
+  const [exportingPDF, setExportingPDF] = useState(false)
 
   const [mode, setMode] = useState(isShared ? 'redline' : 'select')
   const [activeCableType, setActiveCableType] = useState('cat6')
@@ -54,6 +56,7 @@ export default function SurveyEditor() {
     setScaleInput(String(data.px_per_ft || 4))
     setFloorPlanUrl(data.floor_plan_url || '')
     setFloorPlanRotation(data.floor_plan_rotation || 0)
+    setIconSize(data.icon_size || 38)
     setLoading(false)
   }
 
@@ -71,6 +74,7 @@ export default function SurveyEditor() {
   function updateCables(newCabs) { setCables(newCabs); scheduleSave(devices, newCabs, svgMarkup, pxPerFt) }
   function updateMarkup(m) { setSvgMarkup(m); scheduleSave(devices, cables, m, pxPerFt) }
   function updateScale(s) { setPxPerFt(s); scheduleSave(devices, cables, svgMarkup, s) }
+  function updateIconSize(s) { setIconSize(s); saveSurvey(id, { icon_size: s }) }
 
   function handleDeviceAdd(data) {
     const d = { ...data, id: uuidv4(), model: '', ip: '', notes: '', cost: 0, qty: 1 }
@@ -142,6 +146,27 @@ export default function SurveyEditor() {
     const newRotation = (floorPlanRotation + 90) % 360
     setFloorPlanRotation(newRotation)
     await saveSurvey(id, { floor_plan_rotation: newRotation })
+  }
+
+  async function handleExportPDF() {
+    setExportingPDF(true)
+    try {
+      const jsPDFScript = document.createElement('script')
+      jsPDFScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+      await new Promise((res, rej) => { jsPDFScript.onload = res; jsPDFScript.onerror = rej; document.head.appendChild(jsPDFScript) })
+      const html2canvasScript = document.createElement('script')
+      html2canvasScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
+      await new Promise((res, rej) => { html2canvasScript.onload = res; html2canvasScript.onerror = rej; document.head.appendChild(html2canvasScript) })
+      const canvasEl = document.querySelector('[data-export-canvas]')
+      if (!canvasEl) { alert('Could not find canvas to export.'); setExportingPDF(false); return }
+      const rendered = await window.html2canvas(canvasEl, { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' })
+      const imgData = rendered.toDataURL('image/png')
+      const { jsPDF } = window.jspdf
+      const pdf = new jsPDF({ orientation: rendered.width > rendered.height ? 'landscape' : 'portrait', unit: 'px', format: [rendered.width / 2, rendered.height / 2] })
+      pdf.addImage(imgData, 'PNG', 0, 0, rendered.width / 2, rendered.height / 2)
+      pdf.save(`${survey?.name || 'survey'}.pdf`)
+    } catch (err) { alert('Export failed: ' + err.message) }
+    setExportingPDF(false)
   }
 
   async function handleShare() {
@@ -232,6 +257,19 @@ export default function SurveyEditor() {
             <i className="ti ti-share" /> Share
           </button>
         )}
+        {!isShared && (
+          <button style={{ ...tbBtn, color: exportingPDF ? '#888' : '#BA7517', borderColor: '#FAC775' }} onClick={handleExportPDF} disabled={exportingPDF}>
+            <i className="ti ti-file-type-pdf" /> {exportingPDF ? 'Exporting…' : 'Export PDF'}
+          </button>
+        )}
+        <div style={{ width: '0.5px', height: 22, background: '#e0dfd8' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <i className="ti ti-layout-grid" style={{ fontSize: 13, color: '#888' }} />
+          <input type="range" min="20" max="80" step="2" value={iconSize}
+            onChange={e => updateIconSize(parseInt(e.target.value))}
+            style={{ width: 64 }} title="Icon size" />
+          <span style={{ fontSize: 11, color: '#888', minWidth: 24 }}>{iconSize}px</span>
+        </div>
 
         <span style={{ marginLeft: 'auto', fontSize: 11, color: saving ? '#BA7517' : '#1D9E75' }}>
           {saving ? 'Saving…' : saveMsg}
@@ -292,6 +330,7 @@ export default function SurveyEditor() {
           selectedId={selectedId} selectedCableId={selectedCableId}
           floorPlanUrl={floorPlanUrl}
           floorPlanRotation={floorPlanRotation}
+          iconSize={iconSize}
         />
 
         <div style={{ width: 172, flexShrink: 0, background: '#f8f8f6', borderLeft: '0.5px solid #e0dfd8', padding: 12, overflowY: 'auto' }}>

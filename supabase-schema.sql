@@ -59,3 +59,27 @@ create policy "Owners delete floor plans"
 
 -- Run this if you already created the table previously (adds rotation column)
 alter table surveys add column if not exists floor_plan_rotation integer default 0;
+
+-- ============================================================
+-- Run these if you already have the surveys table set up
+-- ============================================================
+
+-- Projects table
+create table if not exists projects (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  name text not null,
+  created_at timestamptz default now()
+);
+
+alter table projects enable row level security;
+
+create policy "Users manage own projects"
+  on projects for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- Add new columns to surveys
+alter table surveys add column if not exists project_id uuid references projects(id) on delete set null;
+alter table surveys add column if not exists icon_size integer default 38;
+alter table surveys add column if not exists floor_plan_rotation integer default 0;

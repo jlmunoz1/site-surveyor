@@ -10,6 +10,7 @@ export default function SurveyCanvas({
   selectedId, selectedCableId,
   floorPlanUrl,
   floorPlanRotation = 0,
+  iconSize = 38,
 }) {
   const wrapRef = useRef(null)
   const fpCanvasRef = useRef(null)
@@ -122,7 +123,7 @@ export default function SurveyCanvas({
       }
       img.src = floorPlanUrl
     }
-}, [floorPlanUrl, floorPlanRotation])
+  }, [floorPlanUrl])
 
   // Heat map
   useEffect(() => {
@@ -371,6 +372,7 @@ export default function SurveyCanvas({
           cursor: isPanning.current ? 'grabbing' : mode === 'select' ? 'default' : 'crosshair',
           background: 'repeating-linear-gradient(0deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px),repeating-linear-gradient(90deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px)'
         }}
+        data-export-canvas="true"
         onMouseDown={handleWrapMouseDown}
         onMouseMove={handleWrapMouseMove}
         onMouseUp={handleWrapMouseUp}
@@ -405,11 +407,11 @@ export default function SurveyCanvas({
             <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
               style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
               <div style={{
-                width: 38, height: 38, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: iconSize, height: iconSize, borderRadius: Math.round(iconSize * 0.21), display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: d.color + '15', border: selectedId === d.id ? `2px solid ${d.color}` : '2px solid transparent',
                 boxShadow: selectedId === d.id ? `0 0 0 3px ${d.color}22` : 'none'
               }}>
-                <svg width="34" height="34" viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
+                <svg width={iconSize - 4} height={iconSize - 4} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
               </div>
               <div style={{ fontSize: 10, color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 5px', borderRadius: 4, border: '0.5px solid #ddd', whiteSpace: 'nowrap', maxWidth: 84, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {d.label}
