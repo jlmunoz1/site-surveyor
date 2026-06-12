@@ -20,11 +20,37 @@ export default function SurveyCanvas({
   const [drawEl, setDrawEl] = useState(null)
 
   // Load floor plan image/PDF URL
-  useEffect(() => {
-    if (!floorPlanUrl || !fpCanvasRef.current) return
+ useEffect(() => {
+    if (!floorPlanUrl || !fpCanvasRef.current || !wrapRef.current) return
     const canvas = fpCanvasRef.current
     const ctx = canvas.getContext('2d')
-    if (floorPlanUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) || floorPlanUrl.includes('floor-plans')) {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const wr = wrapRef.current.getBoundingClientRect()
+      const scale = Math.min(wr.width / img.naturalWidth, wr.height / img.naturalHeight, 1)
+      canvas.width = Math.round(img.naturalWidth * scale)
+      canvas.height = Math.round(img.naturalHeight * scale)
+      canvas.style.width = canvas.width + 'px'
+      canvas.style.height = canvas.height + 'px'
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    }
+    img.onerror = () => {
+      const proxyUrl = floorPlanUrl.replace('https://', 'https://images.weserv.nl/?url=')
+      const img2 = new Image()
+      img2.onload = () => {
+        const wr = wrapRef.current.getBoundingClientRect()
+        const scale = Math.min(wr.width / img2.naturalWidth, wr.height / img2.naturalHeight, 1)
+        canvas.width = Math.round(img2.naturalWidth * scale)
+        canvas.height = Math.round(img2.naturalHeight * scale)
+        canvas.style.width = canvas.width + 'px'
+        canvas.style.height = canvas.height + 'px'
+        ctx.drawImage(img2, 0, 0, canvas.width, canvas.height)
+      }
+      img2.src = proxyUrl
+    }
+    img.src = floorPlanUrl
+  }, [floorPlanUrl])
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.onload = () => {
