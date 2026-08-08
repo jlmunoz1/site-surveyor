@@ -1,106 +1,47 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL
-const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY
+export const supabase = createClient(
+  process.env.REACT_APP_SUPABASE_URL,
+  process.env.REACT_APP_SUPABASE_ANON_KEY
+);
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const DEVICE_OPTS = [
+  { label: 'UCG-Fiber',                key: 'UCG-Fiber',            ports: 8,  u: 1, color: 'purple' },
+  { label: 'Mission Critical (8p)',    key: 'USW-Mission-Critical', ports: 9,  u: 1, color: 'blue', sfpStart: 9, sfpCount: 1, rj45_1g: 8, note: '8-port PoE+ · 1 uplink · built-in battery backup' },
+  { label: 'USW-Pro-Max-48-POE (48p)', key: 'USW-Pro-Max-48',      ports: 52, u: 1, color: 'blue', sfpStart: 49, sfpCount: 4, rj45_1g: 32, rj45_25g: 16 },
+  { label: 'USW-Pro-Max-24 (24p)',     key: 'USW-Pro-Max-24',      ports: 26, u: 1, color: 'blue', sfpStart: 25, sfpCount: 2, rj45_1g: 16, rj45_25g: 8  },
+  { label: 'USW-Pro-Max-16 (16p)',     key: 'USW-Pro-Max-16',      ports: 18, u: 1, color: 'blue', sfpStart: 17, sfpCount: 2, rj45_1g: 12, rj45_25g: 4  },
+  { label: 'USW-Flex-Mini (5p)',       key: 'USW-Flex-Mini',       ports: 5,  u: 1, color: 'teal', mountOptions: ['rack','wall']  },
+  { label: 'USW-Ultra (7p)',           key: 'USW-Ultra',           ports: 7,  u: 1, color: 'teal', mountOptions: ['rack','wall']  },
+  { label: 'Patch Panel 48p',          key: 'Patch Panel',         ports: 48, u: 1, color: 'green' },
+  { label: 'Patch Panel 24p',          key: 'Patch Panel',         ports: 24, u: 1, color: 'green' },
+  { label: 'Patch Panel 12p',          key: 'Patch Panel',         ports: 12, u: 1, color: 'green' },
+  { label: 'UniFi UPS Pro (2U)',        key: 'UUPS-PRO',            ports: 0,  u: 2, color: 'gray', mountOptions: ['rack','floor']  },
+  { label: 'UniFi UPS Tower',           key: 'UUPS-TOWER',          ports: 0,  u: 0, color: 'gray', mountOptions: ['rack','wall','floor']  },
+  { label: 'Empty 1U spacer',          key: 'empty',               ports: 0,  u: 1, color: 'gray'  },
+];
 
-// Auth helpers
-export async function signUp(email, password, fullName) {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { full_name: fullName } }
-  })
-  return { data, error }
-}
+export const ICON_MAP = {
+  'UCG-Fiber': 'ti-antenna',
+  'USW-Mission-Critical': 'ti-shield-bolt',
+  'USW-Pro-Max-48': 'ti-switch',
+  'USW-Pro-Max-24': 'ti-switch',
+  'USW-Pro-Max-16': 'ti-switch',
+  'USW-Flex-Mini': 'ti-switch-2',
+  'USW-Ultra': 'ti-switch-2',
+  'Patch Panel': 'ti-grid-dots',
+  'UPS/PDU': 'ti-bolt',
+  'UUPS-PRO': 'ti-bolt',
+  'UUPS-TOWER': 'ti-bolt',
+};
 
-export async function signIn(email, password) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-  return { data, error }
-}
+export const COLOR_MAP = {
+  blue:   { bg: '#dbeafe', text: '#1e40af', slot: '#60a5fa', rack: '#0c1f3d', label: '#93c5fd' },
+  teal:   { bg: '#ccfbf1', text: '#0f766e', slot: '#2dd4bf', rack: '#07201e', label: '#5eead4' },
+  green:  { bg: '#dcfce7', text: '#166534', slot: '#4ade80', rack: '#0a2010', label: '#86efac' },
+  purple: { bg: '#ede9fe', text: '#6d28d9', slot: '#a78bfa', rack: '#1e0a3c', label: '#c4b5fd' },
+  gray:   { bg: '#f1f5f9', text: '#475569', slot: '#6b7280', rack: '#1c1f26', label: '#d4d4d8' },
+};
 
-export async function signOut() {
-  const { error } = await supabase.auth.signOut()
-  return { error }
-}
-
-export async function getSession() {
-  const { data: { session } } = await supabase.auth.getSession()
-  return session
-}
-
-// Survey helpers
-export async function createSurvey(userId, name, projectId = null) {
-  const { data, error } = await supabase
-    .from('surveys')
-    .insert({ user_id: userId, name, project_id: projectId, devices: [], cables: [], svg_markup: '', px_per_ft: 4, icon_sizes: {cameras:16,lora:20,network:20,access:16}, floor_plan_rotation: 0 })
-    .select()
-    .single()
-  return { data, error }
-}
-
-export async function getSurveys(userId) {
-  const { data, error } = await supabase
-    .from('surveys')
-    .select('id, name, created_at, updated_at, floor_plan_url')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false })
-  return { data, error }
-}
-
-export async function getSurvey(id) {
-  const { data, error } = await supabase
-    .from('surveys')
-    .select('*')
-    .eq('id', id)
-    .single()
-  return { data, error }
-}
-
-export async function saveSurvey(id, updates) {
-  const { data, error } = await supabase
-    .from('surveys')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single()
-  return { data, error }
-}
-
-export async function deleteSurvey(id) {
-  const { error } = await supabase.from('surveys').delete().eq('id', id)
-  return { error }
-}
-
-export async function uploadFloorPlan(surveyId, file) {
-  const ext = file.name.split('.').pop()
-  const path = `${surveyId}/floor-plan.${ext}`
-  const { error } = await supabase.storage
-    .from('floor-plans')
-    .upload(path, file, { upsert: true })
-  if (error) return { url: null, error }
-  const { data: { publicUrl } } = supabase.storage.from('floor-plans').getPublicUrl(path)
-  return { url: publicUrl, error: null }
-}
-
-// Share tokens — allow read-only + redline access without login
-export async function createShareToken(surveyId) {
-  const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
-  const { data, error } = await supabase
-    .from('share_tokens')
-    .insert({ survey_id: surveyId, token })
-    .select()
-    .single()
-  return { token: data?.token, error }
-}
-
-export async function getSurveyByToken(token) {
-  const { data: tokenRow, error: tokenErr } = await supabase
-    .from('share_tokens')
-    .select('survey_id')
-    .eq('token', token)
-    .single()
-  if (tokenErr) return { data: null, error: tokenErr }
-  return getSurvey(tokenRow.survey_id)
-}
+export const canWrite = (role) => ['admin', 'tech'].includes(role);
+export const isAdmin  = (role) => role === 'admin';
