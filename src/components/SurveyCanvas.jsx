@@ -194,19 +194,38 @@ export default function SurveyCanvas({
     if (!el) return
     const onWheel = (e) => {
       e.preventDefault()
-      const rect = el.getBoundingClientRect()
-      const mouseX = e.clientX - rect.left
-      const mouseY = e.clientY - rect.top
-      const factor = e.deltaY > 0 ? 0.9 : 1.1
-      const newZoom = Math.min(Math.max(zoomRef.current * factor, 0.2), 8)
-      const newPan = {
-        x: mouseX - (mouseX - panRef.current.x) * (newZoom / zoomRef.current),
-        y: mouseY - (mouseY - panRef.current.y) * (newZoom / zoomRef.current),
+
+      // Pinch-to-zoom (trackpad) and Ctrl/Cmd+scroll (mouse) => zoom.
+      // Plain two-finger scroll => pan. Without this split, every
+      // ordinary scroll event was being read as a zoom command, and
+      // trackpad momentum kept firing events after the gesture ended,
+      // which is what produced the runaway "infinite zoom" and made
+      // the floor plan feel like it never held still.
+      if (e.ctrlKey || e.metaKey) {
+        const rect = el.getBoundingClientRect()
+        const mouseX = e.clientX - rect.left
+        const mouseY = e.clientY - rect.top
+        // Clamp the per-event delta so a big inertial spike can't
+        // slam the zoom level in one jump.
+        const delta = Math.max(-40, Math.min(40, e.deltaY))
+        const factor = Math.exp(-delta * 0.01)
+        const newZoom = Math.min(Math.max(zoomRef.current * factor, 0.2), 8)
+        const newPan = {
+          x: mouseX - (mouseX - panRef.current.x) * (newZoom / zoomRef.current),
+          y: mouseY - (mouseY - panRef.current.y) * (newZoom / zoomRef.current),
+        }
+        zoomRef.current = newZoom
+        panRef.current = newPan
+        setZoom(newZoom)
+        setPan(newPan)
+      } else {
+        const newPan = {
+          x: panRef.current.x - e.deltaX,
+          y: panRef.current.y - e.deltaY,
+        }
+        panRef.current = newPan
+        setPan(newPan)
       }
-      zoomRef.current = newZoom
-      panRef.current = newPan
-      setZoom(newZoom)
-      setPan(newPan)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -381,7 +400,7 @@ export default function SurveyCanvas({
         <button onClick={resetView} style={{ ...zoomBtn, fontSize: 11 }}>⌂</button>
       </div>
       <div style={{ position: 'absolute', bottom: 12, left: 12, zIndex: 10, fontSize: 10, color: '#888', background: 'rgba(255,255,255,0.85)', padding: '2px 7px', borderRadius: 4, pointerEvents: 'none' }}>
-        {Math.round(zoom * 100)}% · scroll to zoom · drag to pan
+        {Math.round(zoom * 100)}% · scroll or drag to pan · pinch / ⌘+scroll to zoom
       </div>
 
       <div
