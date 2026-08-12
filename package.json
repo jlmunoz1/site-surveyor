@@ -1,5 +1,5 @@
 {
-  "name": "sage-port-mapper",
+  "name": "site-surveyor",
   "version": "1.0.0",
   "private": true,
   "dependencies": {

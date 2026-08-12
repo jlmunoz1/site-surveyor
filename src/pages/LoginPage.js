@@ -44,8 +44,8 @@ export default function LoginPage({ onLogin }) {
             </svg>
           </div>
           <div>
-            <div style={S.appName}>Sage Port Mapper</div>
-            <div style={S.appSub}>UniFi Network Infrastructure</div>
+            <div style={S.appName}>Site Surveyor</div>
+            <div style={S.appSub}>Network Infrastructure Mapping</div>
           </div>
         </div>
 

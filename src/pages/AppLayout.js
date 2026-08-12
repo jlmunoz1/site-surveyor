@@ -65,8 +65,8 @@ export default function AppLayout() {
               <circle cx="20" cy="5" r="1" fill="#fff"/><circle cx="20" cy="11" r="1" fill="#fff"/><circle cx="20" cy="17" r="1" fill="#fff"/>
             </svg>
           </div>
-          <span style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>Sage Port Mapper</span>
-          <span style={{ fontSize: 12, color: '#93b4d9' }}>UniFi Infrastructure</span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>Site Surveyor</span>
+          <span style={{ fontSize: 12, color: '#93b4d9' }}>Network Infrastructure Mapping</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 20, background: rbg, color: rc }}>{role}</span>

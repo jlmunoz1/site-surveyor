@@ -43,7 +43,7 @@ function addPageHeader(pdf, title, pageW) {
   pdf.setTextColor(255, 255, 255);
   pdf.setFontSize(13);
   pdf.setFont('helvetica', 'bold');
-  pdf.text('Sage Port Mapper', 14, 21);
+  pdf.text('Site Surveyor', 14, 21);
   pdf.setFontSize(10);
   pdf.setFont('helvetica', 'normal');
   pdf.text(title, pageW / 2, 21, { align: 'center' });
@@ -800,7 +800,7 @@ export async function exportFullPDF({ mapCanvasRef, sites: propSites, statusMsg,
   // ── Save ──────────────────────────────────────────────────────────────────
   statusMsg('Saving PDF…');
   const date = new Date().toISOString().slice(0, 10);
-  const fname = siteName ? `${siteName.replace(/\s+/g,'-')}-${date}.pdf` : `sage-port-mapper-${date}.pdf`;
+  const fname = siteName ? `${siteName.replace(/\s+/g,'-')}-${date}.pdf` : `site-surveyor-${date}.pdf`;
   
   // Use blob URL download to bypass popup blockers
   try {
