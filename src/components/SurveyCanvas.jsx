@@ -216,16 +216,24 @@ export default function SurveyCanvas({
         // oversensitive response to a normal gesture.
         const delta = Math.max(-25, Math.min(25, e.deltaY))
         const factor = Math.exp(-delta * 0.0015)
-        const newZoom = Math.min(Math.max(zoomRef.current * factor, 0.2), 8)
-        const newPan = {
-          x: mouseX - (mouseX - panRef.current.x) * (newZoom / zoomRef.current),
-          y: mouseY - (mouseY - panRef.current.y) * (newZoom / zoomRef.current),
-        }
+        // Floor plan is locked to its fitted size — never zoom below
+        // 1x (the "locked" baseline), only in from there.
+        const newZoom = Math.min(Math.max(zoomRef.current * factor, 1), 8)
+        const newPan = newZoom === 1
+          ? { x: 0, y: 0 }
+          : {
+              x: mouseX - (mouseX - panRef.current.x) * (newZoom / zoomRef.current),
+              y: mouseY - (mouseY - panRef.current.y) * (newZoom / zoomRef.current),
+            }
         zoomRef.current = newZoom
         panRef.current = newPan
         setZoom(newZoom)
         setPan(newPan)
       } else {
+        // While at the locked 1x baseline, the floor plan shouldn't
+        // drift on plain scroll — panning only kicks in once the
+        // user has actually zoomed in past the locked size.
+        if (zoomRef.current <= 1) return
         const newPan = {
           x: panRef.current.x - e.deltaX,
           y: panRef.current.y - e.deltaY,
@@ -296,6 +304,9 @@ export default function SurveyCanvas({
 
   function handleWrapMouseMove(e) {
     if (isPanning.current) {
+      // Locked at the fitted 1x baseline — dragging shouldn't move
+      // the floor plan until the user has zoomed in.
+      if (zoomRef.current <= 1) return
       const newPan = {
         x: panOrigin.current.x + (e.clientX - panStart.current.x),
         y: panOrigin.current.y + (e.clientY - panStart.current.y),
@@ -373,13 +384,15 @@ export default function SurveyCanvas({
   }
 
   function zoomOut() {
-    const newZoom = Math.max(zoomRef.current * 0.8, 0.2)
+    const newZoom = Math.max(zoomRef.current * 0.8, 1)
     const wr = wrapRef.current.getBoundingClientRect()
     const cx = wr.width / 2, cy = wr.height / 2
-    const newPan = {
-      x: cx - (cx - panRef.current.x) * (newZoom / zoomRef.current),
-      y: cy - (cy - panRef.current.y) * (newZoom / zoomRef.current),
-    }
+    const newPan = newZoom === 1
+      ? { x: 0, y: 0 }
+      : {
+          x: cx - (cx - panRef.current.x) * (newZoom / zoomRef.current),
+          y: cy - (cy - panRef.current.y) * (newZoom / zoomRef.current),
+        }
     zoomRef.current = newZoom; panRef.current = newPan
     setZoom(newZoom); setPan(newPan)
   }
@@ -407,7 +420,7 @@ export default function SurveyCanvas({
         <button onClick={resetView} style={{ ...zoomBtn, fontSize: 11 }}>⌂</button>
       </div>
       <div style={{ position: 'absolute', bottom: 12, left: 12, zIndex: 10, fontSize: 10, color: '#888', background: 'rgba(255,255,255,0.85)', padding: '2px 7px', borderRadius: 4, pointerEvents: 'none' }}>
-        {Math.round(zoom * 100)}% · scroll or drag to pan · pinch / ⌘+scroll to zoom
+        {Math.round(zoom * 100)}% · {zoom > 1 ? 'scroll or drag to pan · pinch / ⌘+scroll to zoom' : 'pinch / ⌘+scroll to zoom in'}
       </div>
 
       <div
