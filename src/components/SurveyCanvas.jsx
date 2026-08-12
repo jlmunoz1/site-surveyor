@@ -206,9 +206,16 @@ export default function SurveyCanvas({
         const mouseX = e.clientX - rect.left
         const mouseY = e.clientY - rect.top
         // Clamp the per-event delta so a big inertial spike can't
-        // slam the zoom level in one jump.
-        const delta = Math.max(-40, Math.min(40, e.deltaY))
-        const factor = Math.exp(-delta * 0.01)
+        // slam the zoom level in one jump. The exponent here is
+        // deliberately gentle: trackpad pinch-to-zoom fires many
+        // wheel events per second with fairly large deltaY values,
+        // and a too-strong per-event multiplier compounds across
+        // those events into the zoom level rocketing to its min/max
+        // clamp almost instantly — which is what felt like
+        // "crazy infinite zoom" even though it's just a very
+        // oversensitive response to a normal gesture.
+        const delta = Math.max(-25, Math.min(25, e.deltaY))
+        const factor = Math.exp(-delta * 0.0015)
         const newZoom = Math.min(Math.max(zoomRef.current * factor, 0.2), 8)
         const newPan = {
           x: mouseX - (mouseX - panRef.current.x) * (newZoom / zoomRef.current),
