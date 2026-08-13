@@ -30,12 +30,63 @@ export default function SurveyCanvas({
   const panOrigin = useRef({ x: 0, y: 0 })
   const zoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
+  // Caches the already-loaded floor plan source (image or rendered PDF
+  // page) so that rotating doesn't have to re-fetch/re-render from
+  // scratch every time — only redraw. Re-loading on rotation was what
+  // caused the floor plan to flash back to its original orientation
+  // before snapping to the new one.
+  const loadedSourceRef = useRef(null) // { kind: 'image'|'pdf', img?, canvas?, displayScale? }
+  const loadedUrlRef = useRef(null)
 
   // Keep refs in sync for event handlers
   useEffect(() => { zoomRef.current = zoom }, [zoom])
   useEffect(() => { panRef.current = pan }, [pan])
 
-  // Load / clear floor plan
+  // Draw the cached floor plan source onto the visible canvas at the
+  // given rotation. Pure redraw — no network/render work.
+  const drawFloorPlanAtRotation = useCallback((rot) => {
+    const source = loadedSourceRef.current
+    const canvas = fpCanvasRef.current
+    if (!source || !canvas || !wrapRef.current) return
+    const ctx = canvas.getContext('2d')
+    const rotNorm = ((rot || 0) % 360 + 360) % 360
+    const isRotated90 = rotNorm === 90 || rotNorm === 270
+
+    if (source.kind === 'image') {
+      const image = source.img
+      const wr = wrapRef.current.getBoundingClientRect()
+      const srcW = image.naturalWidth, srcH = image.naturalHeight
+      const displayW = isRotated90 ? srcH : srcW
+      const displayH = isRotated90 ? srcW : srcH
+      const scale = Math.min(wr.width / displayW, wr.height / displayH, 1) * 2
+      canvas.width = Math.round(displayW * scale)
+      canvas.height = Math.round(displayH * scale)
+      canvas.style.width = Math.round(canvas.width / 2) + 'px'
+      canvas.style.height = Math.round(canvas.height / 2) + 'px'
+      const rad = (rotNorm * Math.PI) / 180
+      ctx.save()
+      ctx.translate(canvas.width / 2, canvas.height / 2)
+      ctx.rotate(rad)
+      ctx.drawImage(image, -srcW * scale / 2, -srcH * scale / 2, srcW * scale, srcH * scale)
+      ctx.restore()
+    } else if (source.kind === 'pdf') {
+      const raw = source.canvas
+      const displayScale = source.displayScale
+      const outW = isRotated90 ? raw.height : raw.width
+      const outH = isRotated90 ? raw.width : raw.height
+      canvas.width = outW
+      canvas.height = outH
+      canvas.style.width = Math.round(outW * displayScale) + 'px'
+      canvas.style.height = Math.round(outH * displayScale) + 'px'
+      ctx.save()
+      ctx.translate(canvas.width / 2, canvas.height / 2)
+      ctx.rotate((rotNorm * Math.PI) / 180)
+      ctx.drawImage(raw, -raw.width / 2, -raw.height / 2)
+      ctx.restore()
+    }
+  }, [])
+
+  // Load the floor plan source (only when the URL actually changes)
   useEffect(() => {
     if (!fpCanvasRef.current) return
     const canvas = fpCanvasRef.current
@@ -47,6 +98,14 @@ export default function SurveyCanvas({
       canvas.height = 0
       canvas.style.width = '0px'
       canvas.style.height = '0px'
+      loadedSourceRef.current = null
+      loadedUrlRef.current = null
+      return
+    }
+
+    if (loadedUrlRef.current === floorPlanUrl && loadedSourceRef.current) {
+      // Already loaded — just draw at the current rotation.
+      drawFloorPlanAtRotation(floorPlanRotation)
       return
     }
 
@@ -69,64 +128,45 @@ export default function SurveyCanvas({
           const page = await pdf.getPage(1)
           const RENDER_SCALE = 3
           const vp = page.getViewport({ scale: RENDER_SCALE })
-          canvas.width = Math.round(vp.width)
-          canvas.height = Math.round(vp.height)
+          const raw = document.createElement('canvas')
+          raw.width = Math.round(vp.width)
+          raw.height = Math.round(vp.height)
           const wr = wrapRef.current.getBoundingClientRect()
-          const displayScale = Math.min(wr.width / canvas.width, wr.height / canvas.height)
-          canvas.style.width = Math.round(canvas.width * displayScale) + 'px'
-          canvas.style.height = Math.round(canvas.height * displayScale) + 'px'
-          await page.render({ canvasContext: ctx, viewport: vp }).promise
-          // Apply rotation if needed
-          const rot = floorPlanRotation || 0
-          if (rot !== 0) {
-            const isRotated90 = rot === 90 || rot === 270
-            const offscreen = document.createElement('canvas')
-            offscreen.width = isRotated90 ? canvas.height : canvas.width
-            offscreen.height = isRotated90 ? canvas.width : canvas.height
-            const octx = offscreen.getContext('2d')
-            octx.translate(offscreen.width / 2, offscreen.height / 2)
-            octx.rotate((rot * Math.PI) / 180)
-            octx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2)
-            canvas.width = offscreen.width
-            canvas.height = offscreen.height
-            canvas.style.width = Math.round(canvas.width * displayScale) + 'px'
-            canvas.style.height = Math.round(canvas.height * displayScale) + 'px'
-            ctx.drawImage(offscreen, 0, 0)
-          }
+          const displayScale = Math.min(wr.width / raw.width, wr.height / raw.height)
+          await page.render({ canvasContext: raw.getContext('2d'), viewport: vp }).promise
+
+          loadedSourceRef.current = { kind: 'pdf', canvas: raw, displayScale }
+          loadedUrlRef.current = floorPlanUrl
+          drawFloorPlanAtRotation(floorPlanRotation)
         } catch (err) { console.error('PDF render error:', err) }
       }
       loadPDF()
     } else {
       const img = new Image()
       img.crossOrigin = 'anonymous'
-      const draw = (image) => {
-        const wr = wrapRef.current.getBoundingClientRect()
-        const rot = floorPlanRotation || 0
-        const isRotated90 = rot === 90 || rot === 270
-        const srcW = image.naturalWidth, srcH = image.naturalHeight
-        const displayW = isRotated90 ? srcH : srcW
-        const displayH = isRotated90 ? srcW : srcH
-        const scale = Math.min(wr.width / displayW, wr.height / displayH, 1) * 2
-        canvas.width = Math.round(displayW * scale)
-        canvas.height = Math.round(displayH * scale)
-        canvas.style.width = Math.round(canvas.width / 2) + 'px'
-        canvas.style.height = Math.round(canvas.height / 2) + 'px'
-        const rad = (rot * Math.PI) / 180
-        ctx.save()
-        ctx.translate(canvas.width / 2, canvas.height / 2)
-        ctx.rotate(rad)
-        ctx.drawImage(image, -srcW * scale / 2, -srcH * scale / 2, srcW * scale, srcH * scale)
-        ctx.restore()
+      const onReady = (image) => {
+        loadedSourceRef.current = { kind: 'image', img: image }
+        loadedUrlRef.current = floorPlanUrl
+        drawFloorPlanAtRotation(floorPlanRotation)
       }
-      img.onload = () => draw(img)
+      img.onload = () => onReady(img)
       img.onerror = () => {
         const img2 = new Image()
-        img2.onload = () => draw(img2)
+        img2.onload = () => onReady(img2)
         img2.src = floorPlanUrl
       }
       img.src = floorPlanUrl
     }
-  }, [floorPlanUrl, floorPlanRotation])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floorPlanUrl])
+
+  // Redraw (no reload) whenever just the rotation changes
+  useEffect(() => {
+    if (loadedUrlRef.current === floorPlanUrl && loadedSourceRef.current) {
+      drawFloorPlanAtRotation(floorPlanRotation)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floorPlanRotation])
 
   // Heat map
   useEffect(() => {

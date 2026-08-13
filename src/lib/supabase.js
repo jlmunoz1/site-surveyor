@@ -26,11 +26,13 @@ export async function signOut() {
 }
 
 // ── Surveys ─────────────────────────────────────────────────────────────
-export async function getSurveys(userId) {
+// Returns every survey visible to the team (RLS allows any authenticated
+// user to view all rows; only the owner can edit/delete their own).
+// Ownership (survey.user_id) is used client-side to split "My" vs "Team".
+export async function getSurveys() {
   return supabase
     .from('surveys')
     .select('*')
-    .eq('user_id', userId)
     .order('updated_at', { ascending: false })
 }
 
@@ -68,6 +70,25 @@ export async function saveSurvey(id, updates) {
 export async function deleteSurvey(id) {
   const { error } = await supabase.from('surveys').delete().eq('id', id)
   return { error }
+}
+
+// ── Projects ────────────────────────────────────────────────────────────
+export async function getProjects() {
+  return supabase.from('projects').select('*').order('name')
+}
+
+export async function createProject(userId, name) {
+  return supabase.from('projects').insert({ user_id: userId, name }).select().single()
+}
+
+export async function deleteProject(id) {
+  const { error } = await supabase.from('projects').delete().eq('id', id)
+  return { error }
+}
+
+// ── Profiles (for "created by" display) ────────────────────────────────
+export async function getProfiles() {
+  return supabase.from('profiles').select('*')
 }
 
 // ── Floor plan storage ──────────────────────────────────────────────────
