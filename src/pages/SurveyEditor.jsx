@@ -5,12 +5,23 @@ import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
 
+// Sage Port Mapper's stable production URL.
+const NETWORK_MAPPER_URL = 'https://sage-port-mapper.vercel.app'
+const NETWORK_MAPPER_DTYPES = ['mdf', 'idf', 'switch']
+
 function getDefaultDeviceColor(dtype) {
   for (const section of DEVICE_DEFS) {
     const item = section.items.find(i => i.dtype === dtype)
     if (item) return item.color
   }
   return null
+}
+
+function networkMapperUrl(device) {
+  if (!device?.rackId) return NETWORK_MAPPER_URL
+  // Adjust this once we know Sage Port Mapper's actual deep-link format
+  // (e.g. it might expect /rack/:id or a different param name than ?rack=).
+  return `${NETWORK_MAPPER_URL}?rack=${encodeURIComponent(device.rackId)}`
 }
 
 export default function SurveyEditor() {
@@ -49,6 +60,7 @@ export default function SurveyEditor() {
   const [activeCableType, setActiveCableType] = useState('cat6')
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
+  const [showNetworkMapper, setShowNetworkMapper] = useState(false)
   const [selectedCableId, setSelectedCableId] = useState(null)
 
   const [showShare, setShowShare] = useState(false)
@@ -137,7 +149,7 @@ export default function SurveyEditor() {
       return n
     })
   }
-  function handleDeviceSelect(devId) { setSelectedId(devId); setSelectedCableId(null) }
+  function handleDeviceSelect(devId) { setSelectedId(devId); setSelectedCableId(null); setShowNetworkMapper(false) }
   function handleCableAdd(data) {
     const c = { ...data, id: uuidv4() }
     updateCables([...cables, c])
@@ -496,6 +508,18 @@ export default function SurveyEditor() {
                   </button>
                 )}
               </div>
+              {NETWORK_MAPPER_DTYPES.includes(selectedDevice.dtype) && (
+                <div style={{ background: '#F4F3FC', border: '0.5px solid #D8D4F5', borderRadius: 8, padding: 10 }}>
+                  <label style={propLabel}>Rack / site ID (optional)</label>
+                  <input style={propInput} type="text" placeholder="e.g. RACK-04"
+                    value={selectedDevice.rackId || ''}
+                    onChange={e => updateSelectedDevice('rackId', e.target.value)} />
+                  <button onClick={() => setShowNetworkMapper(true)}
+                    style={{ ...ghostBtnSmall, width: '100%', marginTop: 8, background: '#534AB7', color: '#fff', border: 'none' }}>
+                    <i className="ti ti-topology-star-3" style={{ marginRight: 4 }} /> Open in Network Mapper
+                  </button>
+                </div>
+              )}
               {[
                 { label: 'Label',        field: 'label', type: 'text' },
                 { label: 'Model / Part #', field: 'model', type: 'text', placeholder: 'e.g. RAK7268C' },
@@ -711,6 +735,40 @@ export default function SurveyEditor() {
           </div>
           <button style={{ ...ghostBtn, marginTop: 12, width: '100%' }} onClick={() => setShowBOM(false)}>Close</button>
         </Modal>
+      )}
+
+      {showNetworkMapper && selectedDevice && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}
+          onClick={e => { if (e.target === e.currentTarget) setShowNetworkMapper(false) }}>
+          <div style={{ background: '#fff', borderRadius: 12, width: '90vw', height: '85vh', maxWidth: 1200, display: 'flex', flexDirection: 'column', border: '0.5px solid #e0dfd8', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderBottom: '0.5px solid #e0dfd8', background: '#f8f8f6' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <i className="ti ti-topology-star-3" style={{ color: '#534AB7' }} />
+                <span style={{ fontSize: 13, fontWeight: 500, color: '#1a1a18' }}>
+                  Network Mapper — {selectedDevice.label}{selectedDevice.rackId ? ` (${selectedDevice.rackId})` : ''}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <a href={networkMapperUrl(selectedDevice)} target="_blank" rel="noopener noreferrer" style={{ ...ghostBtnSmall, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+                  <i className="ti ti-external-link" style={{ marginRight: 4 }} /> Open in new tab
+                </a>
+                <button onClick={() => setShowNetworkMapper(false)} style={ghostBtnSmall}>
+                  <i className="ti ti-x" />
+                </button>
+              </div>
+            </div>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <iframe
+                src={networkMapperUrl(selectedDevice)}
+                title="Network Mapper"
+                style={{ width: '100%', height: '100%', border: 'none' }}
+              />
+            </div>
+            <div style={{ padding: '6px 16px', fontSize: 10.5, color: '#aaa', borderTop: '0.5px solid #f0efea' }}>
+              If this doesn't load, the other app may block embedding — use "Open in new tab" instead.
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
