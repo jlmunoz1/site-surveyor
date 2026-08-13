@@ -84,6 +84,20 @@ export default function SurveyCanvas({
       ctx.drawImage(raw, -raw.width / 2, -raw.height / 2)
       ctx.restore()
     }
+
+    // Center the floor plan (and everything placed on it) within the
+    // wrapper when at the locked 1x baseline. Without this, a floor
+    // plan whose aspect ratio doesn't match the window just sits
+    // pinned to the top-left with empty space on one side instead of
+    // being centered in the viewport.
+    if (zoomRef.current === 1 && wrapRef.current) {
+      const wr = wrapRef.current.getBoundingClientRect()
+      const cw = parseFloat(canvas.style.width) || 0
+      const ch = parseFloat(canvas.style.height) || 0
+      const centered = { x: Math.max(0, (wr.width - cw) / 2), y: Math.max(0, (wr.height - ch) / 2) }
+      panRef.current = centered
+      setPan(centered)
+    }
   }, [])
 
   // Load the floor plan source (only when the URL actually changes)
@@ -260,7 +274,7 @@ export default function SurveyCanvas({
         // 1x (the "locked" baseline), only in from there.
         const newZoom = Math.min(Math.max(zoomRef.current * factor, 1), 8)
         const newPan = newZoom === 1
-          ? { x: 0, y: 0 }
+          ? getCenterOffset()
           : {
               x: mouseX - (mouseX - panRef.current.x) * (newZoom / zoomRef.current),
               y: mouseY - (mouseY - panRef.current.y) * (newZoom / zoomRef.current),
@@ -442,12 +456,21 @@ export default function SurveyCanvas({
     setZoom(newZoom); setPan(newPan)
   }
 
+  function getCenterOffset() {
+    const canvas = fpCanvasRef.current
+    if (!canvas || !wrapRef.current) return { x: 0, y: 0 }
+    const wr = wrapRef.current.getBoundingClientRect()
+    const cw = parseFloat(canvas.style.width) || 0
+    const ch = parseFloat(canvas.style.height) || 0
+    return { x: Math.max(0, (wr.width - cw) / 2), y: Math.max(0, (wr.height - ch) / 2) }
+  }
+
   function zoomOut() {
     const newZoom = Math.max(zoomRef.current * 0.8, 1)
     const wr = wrapRef.current.getBoundingClientRect()
     const cx = wr.width / 2, cy = wr.height / 2
     const newPan = newZoom === 1
-      ? { x: 0, y: 0 }
+      ? getCenterOffset()
       : {
           x: cx - (cx - panRef.current.x) * (newZoom / zoomRef.current),
           y: cy - (cy - panRef.current.y) * (newZoom / zoomRef.current),
@@ -457,8 +480,9 @@ export default function SurveyCanvas({
   }
 
   function resetView() {
-    zoomRef.current = 1; panRef.current = { x: 0, y: 0 }
-    setZoom(1); setPan({ x: 0, y: 0 })
+    const centered = getCenterOffset()
+    zoomRef.current = 1; panRef.current = centered
+    setZoom(1); setPan(centered)
   }
 
   function getSizeForDevice(dtype) {
