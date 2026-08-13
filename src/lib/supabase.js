@@ -25,6 +25,17 @@ export async function signOut() {
   return { error }
 }
 
+export async function sendPasswordReset(email) {
+  const redirectTo = `${window.location.origin}/reset-password`
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+  return { error }
+}
+
+export async function updatePassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  return { error }
+}
+
 // ── Surveys ─────────────────────────────────────────────────────────────
 // Returns every survey visible to the team (RLS allows any authenticated
 // user to view all rows; only the owner can edit/delete their own).

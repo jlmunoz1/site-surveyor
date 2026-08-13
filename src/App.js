@@ -4,6 +4,7 @@ import AuthPage from './pages/AuthPage'
 import Dashboard from './pages/Dashboard'
 import SurveyEditor from './pages/SurveyEditor'
 import AdminPage from './pages/AdminPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="/survey/:id" element={<ProtectedRoute><SurveyEditor /></ProtectedRoute>} />
           <Route path="/shared/:token" element={<SurveyEditor />} />
           <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
+          <Route path="/reset-password" element={<ProtectedRoute><ResetPasswordPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

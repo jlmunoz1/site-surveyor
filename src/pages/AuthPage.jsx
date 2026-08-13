@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { signIn, signUp } from '../lib/supabase'
+import { signIn, signUp, sendPasswordReset } from '../lib/supabase'
 
 export default function AuthPage() {
-  const [mode, setMode] = useState('login')
+  const [mode, setMode] = useState('login') // 'login' | 'signup' | 'forgot'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -19,12 +19,20 @@ export default function AuthPage() {
       const { error } = await signIn(email, password)
       if (error) setError(error.message)
       else navigate('/dashboard')
-    } else {
+    } else if (mode === 'signup') {
       const { error } = await signUp(email, password, name)
       if (error) setError(error.message)
       else setSuccess('Check your email to confirm your account, then log in.')
+    } else if (mode === 'forgot') {
+      const { error } = await sendPasswordReset(email)
+      if (error) setError(error.message)
+      else setSuccess('Check your email for a link to reset your password.')
     }
     setLoading(false)
+  }
+
+  function switchMode(m) {
+    setMode(m); setError(''); setSuccess('')
   }
 
   return (
@@ -40,17 +48,26 @@ export default function AuthPage() {
           <span style={{ fontSize: 17, fontWeight: 600, color: '#1a1a18' }}>Network Surveyor</span>
         </div>
 
-        <div style={{ display: 'flex', borderBottom: '0.5px solid #e0dfd8', marginBottom: 20 }}>
-          {['login', 'signup'].map(m => (
-            <button key={m} onClick={() => setMode(m)} style={{
-              flex: 1, padding: '8px 0', background: 'none', border: 'none',
-              borderBottom: mode === m ? '2px solid #378ADD' : '2px solid transparent',
-              color: mode === m ? '#378ADD' : '#888', fontSize: 13, cursor: 'pointer', fontWeight: mode === m ? 500 : 400
-            }}>
-              {m === 'login' ? 'Log in' : 'Sign up'}
-            </button>
-          ))}
-        </div>
+        {mode !== 'forgot' && (
+          <div style={{ display: 'flex', borderBottom: '0.5px solid #e0dfd8', marginBottom: 20 }}>
+            {['login', 'signup'].map(m => (
+              <button key={m} onClick={() => switchMode(m)} style={{
+                flex: 1, padding: '8px 0', background: 'none', border: 'none',
+                borderBottom: mode === m ? '2px solid #378ADD' : '2px solid transparent',
+                color: mode === m ? '#378ADD' : '#888', fontSize: 13, cursor: 'pointer', fontWeight: mode === m ? 500 : 400
+              }}>
+                {m === 'login' ? 'Log in' : 'Sign up'}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {mode === 'forgot' && (
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 13, fontWeight: 500, color: '#1a1a18', margin: '0 0 4px' }}>Reset your password</p>
+            <p style={{ fontSize: 12, color: '#888', margin: 0 }}>We'll email you a link to set a new one.</p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {mode === 'signup' && (
@@ -63,10 +80,18 @@ export default function AuthPage() {
             <label style={labelStyle}>Email</label>
             <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@company.com" />
           </div>
-          <div>
-            <label style={labelStyle}>Password</label>
-            <input style={inputStyle} type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" minLength={8} />
-          </div>
+          {mode !== 'forgot' && (
+            <div>
+              <label style={labelStyle}>Password</label>
+              <input style={inputStyle} type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" minLength={8} />
+              {mode === 'login' && (
+                <button type="button" onClick={() => switchMode('forgot')}
+                  style={{ background: 'none', border: 'none', color: '#378ADD', cursor: 'pointer', fontSize: 11, padding: '6px 0 0', display: 'block' }}>
+                  Forgot password?
+                </button>
+              )}
+            </div>
+          )}
 
           {error && <p style={{ fontSize: 12, color: '#A32D2D', margin: 0, background: '#FCEBEB', padding: '8px 10px', borderRadius: 6 }}>{error}</p>}
           {success && <p style={{ fontSize: 12, color: '#0F6E56', margin: 0, background: '#E1F5EE', padding: '8px 10px', borderRadius: 6 }}>{success}</p>}
@@ -76,14 +101,19 @@ export default function AuthPage() {
             border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: loading ? 'wait' : 'pointer',
             opacity: loading ? 0.7 : 1
           }}>
-            {loading ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}
+            {loading ? 'Please wait…' : mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create account' : 'Send reset link'}
           </button>
         </form>
 
         {mode === 'login' && (
           <p style={{ fontSize: 11, color: '#888', textAlign: 'center', marginTop: 16 }}>
             Don't have an account?{' '}
-            <button onClick={() => setMode('signup')} style={{ background: 'none', border: 'none', color: '#378ADD', cursor: 'pointer', fontSize: 11 }}>Sign up</button>
+            <button onClick={() => switchMode('signup')} style={{ background: 'none', border: 'none', color: '#378ADD', cursor: 'pointer', fontSize: 11 }}>Sign up</button>
+          </p>
+        )}
+        {mode === 'forgot' && (
+          <p style={{ fontSize: 11, color: '#888', textAlign: 'center', marginTop: 16 }}>
+            <button onClick={() => switchMode('login')} style={{ background: 'none', border: 'none', color: '#378ADD', cursor: 'pointer', fontSize: 11 }}>Back to log in</button>
           </p>
         )}
       </div>

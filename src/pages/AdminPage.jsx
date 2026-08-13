@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { getProfiles, getSurveys, getProjects, setUserAdmin, signOut } from '../lib/supabase'
+import { getProfiles, getSurveys, getProjects, setUserAdmin, sendPasswordReset, signOut } from '../lib/supabase'
 
 export default function AdminPage() {
   const { user } = useAuth()
@@ -11,6 +11,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState(null)
+  const [resetStatus, setResetStatus] = useState({}) // id -> 'sending' | 'sent' | error message
 
   useEffect(() => { loadAll() }, [])
 
@@ -46,6 +47,14 @@ export default function AdminPage() {
     setBusyId(null)
   }
 
+  async function handleResetPassword(u) {
+    setResetStatus(s => ({ ...s, [u.id]: 'sending' }))
+    const { error } = await sendPasswordReset(u.email)
+    setResetStatus(s => ({ ...s, [u.id]: error ? error.message : 'sent' }))
+    // Clear the "sent" confirmation after a few seconds so the button resets
+    setTimeout(() => setResetStatus(s => ({ ...s, [u.id]: null })), 4000)
+  }
+
   async function handleSignOut() {
     await signOut(); navigate('/')
   }
@@ -69,7 +78,7 @@ export default function AdminPage() {
         </div>
       </nav>
 
-      <div style={{ maxWidth: 860, margin: '0 auto', padding: '32px 24px' }}>
+      <div style={{ maxWidth: 980, margin: '0 auto', padding: '32px 24px' }}>
         <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a18', margin: '0 0 4px' }}>Registered users</h1>
         <p style={{ fontSize: 13, color: '#888', margin: '0 0 24px' }}>
           {users.length} account{users.length !== 1 ? 's' : ''} — staff and contractors who have signed up.
@@ -81,41 +90,62 @@ export default function AdminPage() {
           <div style={{ textAlign: 'center', padding: 48, color: '#888', fontSize: 13 }}>Loading…</div>
         ) : (
           <div style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr 110px 110px 110px 120px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr 100px 80px 80px 110px 140px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
               <span>Name</span>
               <span>Email</span>
               <span>Joined</span>
               <span>Surveys</span>
               <span>Projects</span>
               <span>Role</span>
+              <span>Password</span>
             </div>
-            {users.map(u => (
-              <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr 110px 110px 110px 120px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
-                <span style={{ color: '#1a1a18', fontWeight: 500 }}>
-                  {u.full_name || '—'}{u.id === user.id && <span style={{ color: '#888', fontWeight: 400 }}> (you)</span>}
-                </span>
-                <span style={{ color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</span>
-                <span style={{ color: '#aaa', fontSize: 12 }}>
-                  {u.created_at ? new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-                </span>
-                <span style={{ color: '#666' }}>{stats[u.id]?.surveys ?? 0}</span>
-                <span style={{ color: '#666' }}>{stats[u.id]?.projects ?? 0}</span>
-                <button
-                  onClick={() => toggleAdmin(u)}
-                  disabled={u.id === user.id || busyId === u.id}
-                  style={{
-                    padding: '5px 10px', fontSize: 11, fontWeight: 500, borderRadius: 6, cursor: u.id === user.id ? 'default' : 'pointer',
-                    border: u.is_admin ? '0.5px solid #AFA9EC' : '0.5px solid #ccc',
-                    background: u.is_admin ? '#534AB714' : '#fff',
-                    color: u.is_admin ? '#534AB7' : '#666',
-                    opacity: u.id === user.id ? 0.5 : 1,
-                  }}
-                  title={u.id === user.id ? "You can't change your own role here" : ''}
-                >
-                  {u.is_admin ? 'Admin' : 'Make admin'}
-                </button>
-              </div>
-            ))}
+            {users.map(u => {
+              const status = resetStatus[u.id]
+              const isSending = status === 'sending'
+              const isSent = status === 'sent'
+              const isErr = status && status !== 'sending' && status !== 'sent'
+              return (
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr 100px 80px 80px 110px 140px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
+                  <span style={{ color: '#1a1a18', fontWeight: 500 }}>
+                    {u.full_name || '—'}{u.id === user.id && <span style={{ color: '#888', fontWeight: 400 }}> (you)</span>}
+                  </span>
+                  <span style={{ color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</span>
+                  <span style={{ color: '#aaa', fontSize: 12 }}>
+                    {u.created_at ? new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                  </span>
+                  <span style={{ color: '#666' }}>{stats[u.id]?.surveys ?? 0}</span>
+                  <span style={{ color: '#666' }}>{stats[u.id]?.projects ?? 0}</span>
+                  <button
+                    onClick={() => toggleAdmin(u)}
+                    disabled={u.id === user.id || busyId === u.id}
+                    style={{
+                      padding: '5px 10px', fontSize: 11, fontWeight: 500, borderRadius: 6, cursor: u.id === user.id ? 'default' : 'pointer',
+                      border: u.is_admin ? '0.5px solid #AFA9EC' : '0.5px solid #ccc',
+                      background: u.is_admin ? '#534AB714' : '#fff',
+                      color: u.is_admin ? '#534AB7' : '#666',
+                      opacity: u.id === user.id ? 0.5 : 1,
+                    }}
+                    title={u.id === user.id ? "You can't change your own role here" : ''}
+                  >
+                    {u.is_admin ? 'Admin' : 'Make admin'}
+                  </button>
+                  <button
+                    onClick={() => handleResetPassword(u)}
+                    disabled={isSending}
+                    title={isErr ? status : ''}
+                    style={{
+                      padding: '5px 10px', fontSize: 11, fontWeight: 500, borderRadius: 6,
+                      cursor: isSending ? 'wait' : 'pointer',
+                      border: isSent ? '0.5px solid #9AD4BE' : isErr ? '0.5px solid #F09595' : '0.5px solid #ccc',
+                      background: isSent ? '#E1F5EE' : isErr ? '#FCEBEB' : '#fff',
+                      color: isSent ? '#0F6E56' : isErr ? '#A32D2D' : '#666',
+                    }}
+                  >
+                    {isSending ? 'Sending…' : isSent ? 'Email sent ✓' : isErr ? 'Failed — retry' : 'Reset password'}
+                  </button>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
