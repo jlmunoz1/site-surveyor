@@ -86,9 +86,17 @@ export async function deleteProject(id) {
   return { error }
 }
 
-// ── Profiles (for "created by" display) ────────────────────────────────
+// ── Profiles (for "created by" display + admin) ────────────────────────
 export async function getProfiles() {
   return supabase.from('profiles').select('*')
+}
+
+export async function getMyProfile(userId) {
+  return supabase.from('profiles').select('*').eq('id', userId).single()
+}
+
+export async function setUserAdmin(id, isAdmin) {
+  return supabase.from('profiles').update({ is_admin: isAdmin }).eq('id', id)
 }
 
 // ── Floor plan storage ──────────────────────────────────────────────────

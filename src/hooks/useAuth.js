@@ -1,10 +1,11 @@
 import { useState, useEffect, createContext, useContext } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, getMyProfile } from '../lib/supabase'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -18,8 +19,15 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Load the current user's own profile row (has is_admin on it) whenever
+  // the logged-in user changes.
+  useEffect(() => {
+    if (!user) { setProfile(null); return }
+    getMyProfile(user.id).then(({ data }) => setProfile(data || null))
+  }, [user])
+
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthContext.Provider value={{ user, loading, profile, isAdmin: !!profile?.is_admin }}>
       {children}
     </AuthContext.Provider>
   )

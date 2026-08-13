@@ -7,7 +7,7 @@ import {
 } from '../lib/supabase'
 
 export default function Dashboard() {
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const navigate = useNavigate()
   const [surveys, setSurveys] = useState([])
   const [projects, setProjects] = useState([])
@@ -132,6 +132,7 @@ export default function Dashboard() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <span style={{ fontSize: 13, color: '#666' }}>{displayName}</span>
+          {isAdmin && <button onClick={() => navigate('/admin')} style={ghostBtn}>Admin</button>}
           <button onClick={handleSignOut} style={ghostBtn}>Sign out</button>
         </div>
       </nav>
