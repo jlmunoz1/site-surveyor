@@ -296,7 +296,12 @@ export default function SurveyCanvas({
       return
     }
 
-    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+    // Click-and-hold to pan: middle-click or Alt+click always pans.
+    // In select mode (the grab-hand cursor), a plain left-click-and-hold
+    // on empty canvas also pans — mouseup below decides whether it ended
+    // up being a real drag (pan) or just a click (deselect).
+    const wantsPan = e.button === 1 || (e.button === 0 && e.altKey) || (e.button === 0 && mode === 'select')
+    if (wantsPan) {
       e.preventDefault()
       isPanning.current = true
       panStart.current = { x: e.clientX, y: e.clientY }
@@ -309,7 +314,6 @@ export default function SurveyCanvas({
       else finishCable(x, y, null)
       return
     }
-    if (mode === 'select') { onDeviceSelect(null); onCableSelect(null); return }
     if (mode === 'label') {
       const t = prompt('Enter label:')
       if (t && drawSvgRef.current) {
@@ -369,8 +373,23 @@ export default function SurveyCanvas({
     }
   }
 
-  function handleWrapMouseUp() {
-    if (isPanning.current) { isPanning.current = false; return }
+  function handleWrapMouseUp(e) {
+    if (isPanning.current) {
+      isPanning.current = false
+      // In select mode, a click-and-hold that never actually moved is
+      // just a click on empty space — deselect, same as before. If it
+      // moved, it was a real pan drag, so leave the current selection
+      // (if any) alone.
+      if (mode === 'select') {
+        const dx = e.clientX - panStart.current.x
+        const dy = e.clientY - panStart.current.y
+        if (Math.hypot(dx, dy) < 4) {
+          onDeviceSelect(null)
+          onCableSelect(null)
+        }
+      }
+      return
+    }
     if (drawEl) { setDrawStart(null); setDrawEl(null); onMarkupChange(getSVGMarkup()) }
   }
 
@@ -473,7 +492,7 @@ export default function SurveyCanvas({
         data-export-canvas="true"
         onMouseDown={handleWrapMouseDown}
         onMouseMove={handleWrapMouseMove}
-        onMouseUp={handleWrapMouseUp}
+        onMouseUp={e => handleWrapMouseUp(e)}
         onDragOver={e => e.preventDefault()}
         onDrop={handleDrop}
       >
