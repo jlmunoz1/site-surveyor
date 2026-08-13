@@ -534,10 +534,19 @@ export default function SurveyEditor() {
               {selectedDevice.dtype === 'rak-gw' && (
                 <>
                   <div>
-                    <label style={propLabel}>LoRa range: <strong>{selectedDevice.hmRangeFt || 150} ft</strong></label>
-                    <input type="range" min="25" max="400" step="5" style={{ width: '100%' }}
-                      value={selectedDevice.hmRangeFt || 150}
-                      onChange={e => updateSelectedDevice('hmRangeFt', parseInt(e.target.value))} />
+                    <label style={propLabel}>LoRa range</label>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                      <input type="range" min="25" max="400" step="5" style={{ flex: 1 }}
+                        value={selectedDevice.hmRangeFt || 150}
+                        onChange={e => updateSelectedDevice('hmRangeFt', parseInt(e.target.value))} />
+                      <input type="number" min="1" step="1" style={{ ...propInput, width: 60, flexShrink: 0, textAlign: 'right' }}
+                        value={selectedDevice.hmRangeFt || 150}
+                        onChange={e => {
+                          const v = parseInt(e.target.value)
+                          updateSelectedDevice('hmRangeFt', Number.isFinite(v) ? Math.max(1, v) : 0)
+                        }} />
+                      <span style={{ fontSize: 11, color: '#888', flexShrink: 0 }}>ft</span>
+                    </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#888' }}>
                       <span>25 ft</span><span>400 ft</span>
                     </div>
