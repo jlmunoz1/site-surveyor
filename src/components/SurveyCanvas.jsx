@@ -560,7 +560,7 @@ export default function SurveyCanvas({
                           const newLabel = prompt('Rename device:', d.label)
                           if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
                         }}
-                        style={{ fontSize: Math.max(7, Math.round(sz * 0.3)), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', maxWidth: sz * 2.5, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}>
+                        style={{ fontSize: Math.max(7, Math.round(sz * 0.3)), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: 'text' }}>
                         {d.label}
                         {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
                       </div>
