@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { getIconPaths, CABLE_STYLES } from '../lib/devices'
+import { getIconPaths, CABLE_STYLES, DEVICE_STATUSES } from '../lib/devices'
 
 export default function SurveyCanvas({
   devices, cables, svgMarkup, pxPerFt, showHeatmap,
@@ -506,15 +506,32 @@ export default function SurveyCanvas({
               style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
               {(() => {
                 const sz = getSizeForDevice(d.dtype)
+                const status = d.status || 'existing'
+                const statusInfo = DEVICE_STATUSES[status] || DEVICE_STATUSES.existing
+                const isProposed = status === 'proposed'
+                const isRemoved = status === 'removed'
+                const borderWidth = Math.max(1, Math.round(sz * 0.06))
                 return (
                   <>
                     <div style={{
+                      position: 'relative',
                       width: sz, height: sz, borderRadius: Math.round(sz * 0.25), display: 'flex', alignItems: 'center', justifyContent: 'center',
                       background: sz > 8 ? d.color + '15' : 'transparent',
-                      border: selectedId === d.id ? `${Math.max(1, Math.round(sz * 0.06))}px solid ${d.color}` : `${Math.max(1, Math.round(sz * 0.06))}px solid transparent`,
+                      opacity: isRemoved ? 0.45 : 1,
+                      border: selectedId === d.id
+                        ? `${borderWidth}px solid ${d.color}`
+                        : `${borderWidth}px ${isProposed ? 'dashed' : 'solid'} ${isProposed ? statusInfo.color + '99' : 'transparent'}`,
                       boxShadow: selectedId === d.id ? `0 0 0 2px ${d.color}33` : 'none'
                     }}>
                       <svg width={sz} height={sz} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
+                      {isRemoved && (
+                        <div style={{ position: 'absolute', left: '10%', top: '48%', width: '80%', height: Math.max(1, Math.round(sz * 0.06)), background: statusInfo.color, transform: 'rotate(-15deg)' }} />
+                      )}
+                      {d.photoUrl && sz >= 12 && (
+                        <div style={{ position: 'absolute', top: -3, right: -3, width: Math.max(10, Math.round(sz * 0.35)), height: Math.max(10, Math.round(sz * 0.35)), borderRadius: '50%', background: '#378ADD', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <i className="ti ti-camera" style={{ fontSize: Math.max(6, Math.round(sz * 0.22)), color: '#fff' }} />
+                        </div>
+                      )}
                     </div>
                     {sz >= 14 && (
                       <div
@@ -526,6 +543,7 @@ export default function SurveyCanvas({
                         }}
                         style={{ fontSize: Math.max(7, Math.round(sz * 0.3)), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', maxWidth: sz * 2.5, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}>
                         {d.label}
+                        {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
                       </div>
                     )}
                   </>

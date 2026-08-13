@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getSurvey, getSurveyByToken, saveSurvey, uploadFloorPlan, createShareToken } from '../lib/supabase'
+import { getSurvey, getSurveyByToken, saveSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken } from '../lib/supabase'
 import SurveyCanvas from '../components/SurveyCanvas'
-import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon } from '../lib/devices'
+import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
 
 export default function SurveyEditor() {
@@ -50,6 +50,7 @@ export default function SurveyEditor() {
   const [showBOM, setShowBOM] = useState(false)
 
   const fileInputRef = useRef(null)
+  const devicePhotoInputRef = useRef(null)
   const saveTimer = useRef(null)
 
   useEffect(() => {
@@ -96,9 +97,25 @@ export default function SurveyEditor() {
   }
 
   function handleDeviceAdd(data) {
-    const d = { ...data, id: uuidv4(), model: '', ip: '', notes: '', cost: 0, qty: 1 }
+    const d = { ...data, id: uuidv4(), model: '', ip: '', notes: '', cost: 0, qty: 1, status: 'existing', photoUrl: '' }
     updateDevices([...devices, d])
     setSelectedId(d.id); setSelectedCableId(null)
+  }
+  function duplicateSelectedDevice() {
+    if (!selectedDevice) return
+    const copy = { ...selectedDevice, id: uuidv4(), x: selectedDevice.x + 24, y: selectedDevice.y + 24 }
+    updateDevices([...devices, copy])
+    setSelectedId(copy.id)
+  }
+  async function handleDevicePhotoUpload(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !selectedDevice) return
+    setSaving(true)
+    const { url, error } = await uploadDevicePhoto(id, selectedDevice.id, file)
+    setSaving(false)
+    if (error) { setError('Photo upload failed: ' + error.message); return }
+    updateSelectedDevice('photoUrl', url)
   }
   function handleDeviceMove(devId, x, y, newLabel) {
     setDevices(prev => {
@@ -446,6 +463,15 @@ export default function SurveyEditor() {
 
           {selectedDevice && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+              <div>
+                <label style={propLabel}>Status</label>
+                <select style={propInput} value={selectedDevice.status || 'existing'}
+                  onChange={e => updateSelectedDevice('status', e.target.value)}>
+                  {Object.entries(DEVICE_STATUSES).map(([key, s]) => (
+                    <option key={key} value={key}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
               {[
                 { label: 'Label',        field: 'label', type: 'text' },
                 { label: 'Model / Part #', field: 'model', type: 'text', placeholder: 'e.g. RAK7268C' },
@@ -465,6 +491,21 @@ export default function SurveyEditor() {
                 <label style={propLabel}>Notes</label>
                 <textarea style={{ ...propInput, minHeight: 48, resize: 'vertical' }} placeholder="Mount height, port…"
                   value={selectedDevice.notes || ''} onChange={e => updateSelectedDevice('notes', e.target.value)} />
+              </div>
+              <div>
+                <label style={propLabel}>Photo</label>
+                {selectedDevice.photoUrl ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <img src={selectedDevice.photoUrl} alt="Device" style={{ width: '100%', borderRadius: 6, border: '0.5px solid #e0dfd8', display: 'block' }} />
+                    <button onClick={() => devicePhotoInputRef.current.click()} style={ghostBtnSmall}>Replace photo</button>
+                    <button onClick={() => updateSelectedDevice('photoUrl', '')} style={{ ...ghostBtnSmall, color: '#A32D2D', borderColor: '#F09595' }}>Remove photo</button>
+                  </div>
+                ) : (
+                  <button onClick={() => devicePhotoInputRef.current.click()} style={ghostBtnSmall}>
+                    <i className="ti ti-camera-plus" style={{ marginRight: 4 }} /> Attach photo
+                  </button>
+                )}
+                <input ref={devicePhotoInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleDevicePhotoUpload} />
               </div>
               {selectedDevice.dtype === 'rak-gw' && (
                 <>
@@ -494,9 +535,14 @@ export default function SurveyEditor() {
                 </>
               )}
               {!isShared && (
-                <button onClick={deleteSelectedDevice} style={dangerBtn}>
-                  <i className="ti ti-trash" /> Remove device
-                </button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={duplicateSelectedDevice} style={{ ...ghostBtnSmall, flex: 1 }}>
+                    <i className="ti ti-copy" style={{ marginRight: 4 }} /> Duplicate
+                  </button>
+                  <button onClick={deleteSelectedDevice} style={{ ...dangerBtn, flex: 1 }}>
+                    <i className="ti ti-trash" /> Remove
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -653,6 +699,7 @@ const activeTbBtn = { borderColor: '#378ADD', color: '#378ADD', background: '#E6
 const ghostBtn = { padding: '7px 14px', background: '#fff', color: '#444', border: '0.5px solid #ccc', borderRadius: 7, fontSize: 12, cursor: 'pointer' }
 const primaryBtn = { padding: '7px 14px', background: '#378ADD', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 500, cursor: 'pointer' }
 const dangerBtn = { padding: '6px', background: '#FCEBEB', color: '#A32D2D', border: '0.5px solid #F09595', borderRadius: 7, fontSize: 12, cursor: 'pointer', marginTop: 2 }
+const ghostBtnSmall = { padding: '6px', background: '#fff', color: '#444', border: '0.5px solid #ccc', borderRadius: 7, fontSize: 12, cursor: 'pointer' }
 const propLabel = { display: 'block', fontSize: 11, color: '#666', marginBottom: 3 }
 const propInput = { width: '100%', fontSize: 12, padding: '5px 7px', border: '0.5px solid #ccc', borderRadius: 6, background: '#fff', color: '#1a1a18', boxSizing: 'border-box', outline: 'none' }
 const modalTitle = { fontSize: 15, fontWeight: 500, marginBottom: 12, color: '#1a1a18', margin: '0 0 12px' }

@@ -33,6 +33,12 @@ export const DEVICE_DEFS = [
   }
 ]
 
+export const DEVICE_STATUSES = {
+  existing: { label: 'Existing', color: '#3B6D11' },
+  proposed: { label: 'Proposed', color: '#378ADD' },
+  removed:  { label: 'Removed',  color: '#A32D2D' },
+}
+
 export const CABLE_STYLES = {
   cat6:  { stroke: '#378ADD', width: 2,   dash: ''    },
   fiber: { stroke: '#E24B4A', width: 2,   dash: '6,4' },

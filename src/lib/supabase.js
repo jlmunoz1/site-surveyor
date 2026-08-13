@@ -122,6 +122,19 @@ export async function uploadFloorPlan(surveyId, file) {
   return { url: data.publicUrl, error: null }
 }
 
+// Device photos reuse the same public "floor-plans" bucket, just under a
+// devices/ subfolder — avoids needing a second bucket + storage policies.
+export async function uploadDevicePhoto(surveyId, deviceId, file) {
+  const ext = file.name.split('.').pop()
+  const path = `${surveyId}/devices/${deviceId}-${Date.now()}.${ext}`
+  const { error: uploadError } = await supabase.storage
+    .from('floor-plans')
+    .upload(path, file, { upsert: true })
+  if (uploadError) return { url: null, error: uploadError }
+  const { data } = supabase.storage.from('floor-plans').getPublicUrl(path)
+  return { url: data.publicUrl, error: null }
+}
+
 // ── Share links ─────────────────────────────────────────────────────────
 export async function createShareToken(surveyId) {
   const { data: existing } = await supabase
