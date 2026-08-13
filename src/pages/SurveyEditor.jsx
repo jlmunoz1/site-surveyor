@@ -5,6 +5,14 @@ import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
 
+function getDefaultDeviceColor(dtype) {
+  for (const section of DEVICE_DEFS) {
+    const item = section.items.find(i => i.dtype === dtype)
+    if (item) return item.color
+  }
+  return null
+}
+
 export default function SurveyEditor() {
   const { id, token } = useParams()
   const navigate = useNavigate()
@@ -471,6 +479,22 @@ export default function SurveyEditor() {
                     <option key={key} value={key}>{s.label}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label style={propLabel}>Color</label>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input type="color" value={selectedDevice.color || '#378ADD'}
+                    onChange={e => updateSelectedDevice('color', e.target.value)}
+                    style={{ width: 34, height: 30, padding: 2, border: '0.5px solid #ccc', borderRadius: 6, cursor: 'pointer', background: '#fff' }} />
+                  <input style={{ ...propInput, flex: 1 }} type="text" value={selectedDevice.color || ''}
+                    onChange={e => updateSelectedDevice('color', e.target.value)} placeholder="#378ADD" />
+                </div>
+                {getDefaultDeviceColor(selectedDevice.dtype) && selectedDevice.color !== getDefaultDeviceColor(selectedDevice.dtype) && (
+                  <button onClick={() => updateSelectedDevice('color', getDefaultDeviceColor(selectedDevice.dtype))}
+                    style={{ background: 'none', border: 'none', color: '#378ADD', cursor: 'pointer', fontSize: 11, padding: '4px 0 0' }}>
+                    Reset to default
+                  </button>
+                )}
               </div>
               {[
                 { label: 'Label',        field: 'label', type: 'text' },
