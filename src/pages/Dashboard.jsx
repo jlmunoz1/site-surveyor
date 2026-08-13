@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import {
   getSurveys, createSurvey, deleteSurvey, signOut,
-  getProjects, createProject, deleteProject, getProfiles,
+  getProjects, createProject, deleteProject, getProfiles, syncProjectToPortMapper,
 } from '../lib/supabase'
 
 export default function Dashboard() {
@@ -69,6 +69,10 @@ export default function Dashboard() {
     if (error) { setError(error.message); setCreatingProject(false); return }
     setNewProjectName(''); setShowNewProject(false); setCreatingProject(false)
     loadAll()
+    // Best-effort mirror into Port Mapper — never blocks project
+    // creation here, just surfaces a soft warning if it fails.
+    const { error: syncError } = await syncProjectToPortMapper(newProjectName.trim())
+    if (syncError) setError(`Project created, but couldn't sync to Port Mapper: ${syncError}`)
   }
 
   async function handleDeleteProject(id, name) {

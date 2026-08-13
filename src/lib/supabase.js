@@ -97,6 +97,26 @@ export async function deleteProject(id) {
   return { error }
 }
 
+// Best-effort mirror of a newly created project into Port Mapper's
+// "sites" table, via our own serverless function (which holds Port
+// Mapper's service key). Failure here should never block creating the
+// project in Site Surveyor itself — callers should treat this as
+// optional and just surface a soft warning if it fails.
+export async function syncProjectToPortMapper(name) {
+  try {
+    const res = await fetch('/api/create-port-mapper-site', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    const data = await res.json()
+    if (!res.ok) return { error: data.error || 'Failed to sync to Port Mapper' }
+    return { site: data.site, error: null }
+  } catch (err) {
+    return { error: err.message || 'Failed to reach Port Mapper sync' }
+  }
+}
+
 // ── Profiles (for "created by" display + admin) ────────────────────────
 export async function getProfiles() {
   return supabase.from('profiles').select('*')
