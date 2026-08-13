@@ -453,7 +453,7 @@ export default function SurveyCanvas({
   const transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
 
   return (
-    <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+    <div style={{ flex: 1, minWidth: 0, position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <button onClick={zoomIn} style={zoomBtn}>+</button>
         <button onClick={zoomOut} style={zoomBtn}>−</button>
