@@ -12,8 +12,7 @@ export default function SurveyCanvas({
   floorPlanRotation = 0,
   iconSizes = { cameras: 16, lora: 20, network: 20, access: 16 },
   calibrating = false,
-  calibratePoints = [],
-  onCalibratePoint,
+  onCalibrateDrag,
 }) {
   const wrapRef = useRef(null)
   const fpCanvasRef = useRef(null)
@@ -28,6 +27,9 @@ export default function SurveyCanvas({
   const isPanning = useRef(false)
   const panStart = useRef({ x: 0, y: 0 })
   const panOrigin = useRef({ x: 0, y: 0 })
+  const isCalibratingDrag = useRef(false)
+  const calibStartRef = useRef({ x: 0, y: 0 })
+  const [calibDrag, setCalibDrag] = useState(null) // { x1, y1, x2, y2 } while actively dragging
   const zoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
   // Caches the already-loaded floor plan source (image or rendered PDF
@@ -303,10 +305,12 @@ export default function SurveyCanvas({
   function handleWrapMouseDown(e) {
     if (e.target.closest('.sv-device')) return
 
-    // Calibration mode — capture two points
-    if (calibrating && onCalibratePoint && e.button === 0) {
+    // Calibration mode — click and drag a line across a known distance
+    if (calibrating && e.button === 0) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
-      onCalibratePoint(x, y)
+      isCalibratingDrag.current = true
+      calibStartRef.current = { x, y }
+      setCalibDrag({ x1: x, y1: y, x2: x, y2: y })
       return
     }
 
@@ -361,6 +365,11 @@ export default function SurveyCanvas({
   }
 
   function handleWrapMouseMove(e) {
+    if (isCalibratingDrag.current) {
+      const { x, y } = toCanvas(e.clientX, e.clientY)
+      setCalibDrag({ x1: calibStartRef.current.x, y1: calibStartRef.current.y, x2: x, y2: y })
+      return
+    }
     if (isPanning.current) {
       // Locked at the fitted 1x baseline — dragging shouldn't move
       // the floor plan until the user has zoomed in.
@@ -388,6 +397,14 @@ export default function SurveyCanvas({
   }
 
   function handleWrapMouseUp(e) {
+    if (isCalibratingDrag.current) {
+      isCalibratingDrag.current = false
+      const start = calibStartRef.current
+      const { x, y } = toCanvas(e.clientX, e.clientY)
+      setCalibDrag(null)
+      if (onCalibrateDrag) onCalibrateDrag(start.x, start.y, x, y)
+      return
+    }
     if (isPanning.current) {
       isPanning.current = false
       // In select mode, a click-and-hold that never actually moved is
@@ -510,7 +527,7 @@ export default function SurveyCanvas({
         ref={wrapRef}
         style={{
           width: '100%', height: '100%', position: 'relative', overflow: 'hidden',
-          cursor: isPanning.current ? 'grabbing' : mode === 'select' ? 'grab' : 'crosshair',
+          cursor: calibrating ? 'crosshair' : isPanning.current ? 'grabbing' : mode === 'select' ? 'grab' : 'crosshair',
           background: 'repeating-linear-gradient(0deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px),repeating-linear-gradient(90deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px)'
         }}
         data-export-canvas="true"
@@ -596,20 +613,14 @@ export default function SurveyCanvas({
           ))}
         </div>
 
-        {/* Calibration overlay */}
-        {(calibrating || calibratePoints.length > 0) && (
+        {/* Calibration overlay — live line while dragging */}
+        {calibDrag && (
           <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', pointerEvents: 'none', zIndex: 20 }}>
             <svg style={{ overflow: 'visible', position: 'absolute', top: 0, left: 0 }}>
-              {calibratePoints.length >= 1 && (
-                <circle cx={calibratePoints[0].x} cy={calibratePoints[0].y} r={6 / zoom} fill="#E24B4A" stroke="#fff" strokeWidth={2 / zoom} />
-              )}
-              {calibratePoints.length >= 2 && (
-                <>
-                  <line x1={calibratePoints[0].x} y1={calibratePoints[0].y} x2={calibratePoints[1].x} y2={calibratePoints[1].y}
-                    stroke="#E24B4A" strokeWidth={2 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`} />
-                  <circle cx={calibratePoints[1].x} cy={calibratePoints[1].y} r={6 / zoom} fill="#E24B4A" stroke="#fff" strokeWidth={2 / zoom} />
-                </>
-              )}
+              <circle cx={calibDrag.x1} cy={calibDrag.y1} r={6 / zoom} fill="#E24B4A" stroke="#fff" strokeWidth={2 / zoom} />
+              <line x1={calibDrag.x1} y1={calibDrag.y1} x2={calibDrag.x2} y2={calibDrag.y2}
+                stroke="#E24B4A" strokeWidth={2 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`} />
+              <circle cx={calibDrag.x2} cy={calibDrag.y2} r={6 / zoom} fill="#E24B4A" stroke="#fff" strokeWidth={2 / zoom} />
             </svg>
           </div>
         )}

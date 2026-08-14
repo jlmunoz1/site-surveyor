@@ -51,7 +51,6 @@ export default function SurveyEditor() {
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const [calibrating, setCalibrating] = useState(false)
-  const [calibratePoints, setCalibratePoints] = useState([])
   const [showCalibrateModal, setShowCalibrateModal] = useState(false)
   const [calibrateDistance, setCalibrateDistance] = useState('')
   const [calibratePixels, setCalibratePixels] = useState(0)
@@ -219,21 +218,17 @@ export default function SurveyEditor() {
 
   function startCalibrate() {
     setCalibrating(true)
-    setCalibratePoints([])
     setMode('select')
   }
 
-  function handleCalibratePoint(x, y) {
-    const pts = [...calibratePoints, { x, y }]
-    setCalibratePoints(pts)
-    if (pts.length === 2) {
-      const dx = pts[1].x - pts[0].x
-      const dy = pts[1].y - pts[0].y
-      const pixelDist = Math.round(Math.sqrt(dx * dx + dy * dy))
-      setCalibratePixels(pixelDist)
-      setShowCalibrateModal(true)
-      setCalibrating(false)
-    }
+  function handleCalibrateDrag(x1, y1, x2, y2) {
+    const dx = x2 - x1
+    const dy = y2 - y1
+    const pixelDist = Math.round(Math.sqrt(dx * dx + dy * dy))
+    if (pixelDist < 3) { setCalibrating(false); return } // too small to be intentional
+    setCalibratePixels(pixelDist)
+    setShowCalibrateModal(true)
+    setCalibrating(false)
   }
 
   function applyCalibration() {
@@ -372,7 +367,7 @@ export default function SurveyEditor() {
         <button style={{ ...tbBtn, ...(calibrating ? { color: '#E24B4A', borderColor: '#E24B4A', background: '#FCEBEB' } : {}) }}
           onClick={() => calibrating ? setCalibrating(false) : startCalibrate()}
           title="Click two points on the floor plan to set the scale">
-          <i className="ti ti-ruler-measure" /> {calibrating ? 'Click 2 pts…' : 'Set Scale'}
+          <i className="ti ti-ruler-measure" /> {calibrating ? 'Drag a line…' : 'Set Scale'}
         </button>
         <button style={tbBtn} onClick={() => setShowScale(true)} title="Manually enter px/ft">
           <i className="ti ti-adjustments" /> {pxPerFt} px/ft
@@ -470,8 +465,7 @@ export default function SurveyEditor() {
           floorPlanRotation={floorPlanRotation}
           iconSizes={iconSizes}
           calibrating={calibrating}
-          calibratePoints={calibratePoints}
-          onCalibratePoint={handleCalibratePoint}
+          onCalibrateDrag={handleCalibrateDrag}
         />
 
         <div style={{ width: 172, flexShrink: 0, background: '#f8f8f6', borderLeft: '0.5px solid #e0dfd8', padding: 12, overflowY: 'auto' }}>
@@ -642,7 +636,7 @@ export default function SurveyEditor() {
         <Modal onClose={() => { setShowCalibrateModal(false); setCalibratePoints([]) }}>
           <h3 style={modalTitle}>Set scale from measurement</h3>
           <p style={{ fontSize: 12, color: '#666', marginBottom: 14, lineHeight: 1.5 }}>
-            You clicked two points that are <strong>{calibratePixels} pixels</strong> apart on screen.<br/>
+            You drew a line <strong>{calibratePixels} pixels</strong> long on screen.<br/>
             Enter the real-world distance between those two points.
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
