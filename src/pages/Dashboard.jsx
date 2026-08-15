@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import {
   getSurveys, createSurvey, deleteSurvey, signOut,
-  getProjects, createProject, deleteProject, getProfiles, syncProjectToPortMapper,
+  getProjects, createProject, deleteProject, getProfiles,
+  syncProjectToPortMapper, setProjectPortMapperSiteId,
 } from '../lib/supabase'
 
 export default function Dashboard() {
@@ -65,14 +66,20 @@ export default function Dashboard() {
     e.preventDefault()
     if (!newProjectName.trim()) return
     setCreatingProject(true)
-    const { error } = await createProject(user.id, newProjectName.trim())
+    const { data, error } = await createProject(user.id, newProjectName.trim())
     if (error) { setError(error.message); setCreatingProject(false); return }
     setNewProjectName(''); setShowNewProject(false); setCreatingProject(false)
     loadAll()
     // Best-effort mirror into Port Mapper — never blocks project
-    // creation here, just surfaces a soft warning if it fails.
-    const { error: syncError } = await syncProjectToPortMapper(newProjectName.trim())
-    if (syncError) setError(`Project created, but couldn't sync to Port Mapper: ${syncError}`)
+    // creation here, just surfaces a soft warning if it fails. If it
+    // succeeds, save the returned site id so racks can be created
+    // against this project later (e.g. when adding an MDF/IDF).
+    const { site, error: syncError } = await syncProjectToPortMapper(data.name)
+    if (syncError) {
+      setError(`Project created, but couldn't sync to Port Mapper: ${syncError}`)
+    } else if (site?.id) {
+      await setProjectPortMapperSiteId(data.id, site.id)
+    }
   }
 
   async function handleDeleteProject(id, name) {

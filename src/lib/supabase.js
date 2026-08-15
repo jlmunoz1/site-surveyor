@@ -88,6 +88,10 @@ export async function getProjects() {
   return supabase.from('projects').select('*').order('name')
 }
 
+export async function getProject(id) {
+  return supabase.from('projects').select('*').eq('id', id).single()
+}
+
 export async function createProject(userId, name) {
   return supabase.from('projects').insert({ user_id: userId, name }).select().single()
 }
@@ -95,6 +99,10 @@ export async function createProject(userId, name) {
 export async function deleteProject(id) {
   const { error } = await supabase.from('projects').delete().eq('id', id)
   return { error }
+}
+
+export async function setProjectPortMapperSiteId(projectId, siteId) {
+  return supabase.from('projects').update({ port_mapper_site_id: siteId }).eq('id', projectId)
 }
 
 // Best-effort mirror of a newly created project into Port Mapper's
@@ -114,6 +122,24 @@ export async function syncProjectToPortMapper(name) {
     return { site: data.site, error: null }
   } catch (err) {
     return { error: err.message || 'Failed to reach Port Mapper sync' }
+  }
+}
+
+// Best-effort creation of a rack in Port Mapper for a given site, e.g.
+// when an MDF/IDF/switch is placed in Site Surveyor. Same fire-and-forget
+// pattern as syncProjectToPortMapper — never blocks the caller.
+export async function createPortMapperRack(siteId, name, { uSize, rackType } = {}) {
+  try {
+    const res = await fetch('/api/create-port-mapper-rack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId, name, uSize, rackType }),
+    })
+    const data = await res.json()
+    if (!res.ok) return { error: data.error || 'Failed to create rack in Port Mapper' }
+    return { rack: data.rack, error: null }
+  } catch (err) {
+    return { error: err.message || 'Failed to reach Port Mapper rack sync' }
   }
 }
 

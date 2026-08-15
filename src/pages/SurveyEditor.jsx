@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getSurvey, getSurveyByToken, saveSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken } from '../lib/supabase'
+import { getSurvey, getSurveyByToken, saveSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack } from '../lib/supabase'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
@@ -67,6 +67,7 @@ export default function SurveyEditor() {
   const [showScale, setShowScale] = useState(false)
   const [scaleInput, setScaleInput] = useState('4')
   const [showBOM, setShowBOM] = useState(false)
+  const [portMapperSiteId, setPortMapperSiteId] = useState(null)
 
   const fileInputRef = useRef(null)
   const devicePhotoInputRef = useRef(null)
@@ -88,6 +89,13 @@ export default function SurveyEditor() {
     setScaleInput(String(data.px_per_ft || 4))
     setFloorPlanUrl(data.floor_plan_url || '')
     setFloorPlanRotation(data.floor_plan_rotation || 0)
+    // If this survey belongs to a project that's synced to Port Mapper,
+    // remember its site id so newly placed MDF/IDF/switches can get a
+    // matching rack created automatically.
+    if (data.project_id && !isShared) {
+      const { data: project } = await getProject(data.project_id)
+      if (project?.port_mapper_site_id) setPortMapperSiteId(project.port_mapper_site_id)
+    }
     if (data.icon_sizes) {
       setIconSizes(typeof data.icon_sizes === 'object' ? data.icon_sizes : {cameras:16,lora:20,network:20,access:16})
     }
@@ -119,6 +127,13 @@ export default function SurveyEditor() {
     const d = { ...data, id: uuidv4(), model: '', ip: '', notes: '', cost: 0, qty: 1, status: 'existing', photoUrl: '' }
     updateDevices([...devices, d])
     setSelectedId(d.id); setSelectedCableId(null)
+    // Best-effort: auto-create a matching rack in Port Mapper for
+    // MDF/IDF/switch devices, if this survey's project is synced there.
+    if (NETWORK_MAPPER_DTYPES.includes(d.dtype) && portMapperSiteId) {
+      createPortMapperRack(portMapperSiteId, d.label).then(({ error }) => {
+        if (error) console.warn('Port Mapper rack sync failed:', error)
+      })
+    }
   }
   function duplicateSelectedDevice() {
     if (!selectedDevice) return
