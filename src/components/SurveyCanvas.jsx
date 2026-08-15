@@ -1,7 +1,7 @@
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { getIconPaths, CABLE_STYLES, DEVICE_STATUSES } from '../lib/devices'
 
-export default function SurveyCanvas({
+const SurveyCanvas = forwardRef(function SurveyCanvas({
   devices, cables, svgMarkup, pxPerFt, showHeatmap,
   mode, activeCableType,
   onDeviceAdd, onDeviceMove, onDeviceSelect,
@@ -14,7 +14,7 @@ export default function SurveyCanvas({
   iconSizes = { cameras: 16, lora: 20, network: 20, access: 16 },
   calibrating = false,
   onCalibrateDrag,
-}) {
+}, ref) {
   const wrapRef = useRef(null)
   const fpCanvasRef = useRef(null)
   const hmCanvasRef = useRef(null)
@@ -33,6 +33,27 @@ export default function SurveyCanvas({
   const [calibDrag, setCalibDrag] = useState(null) // { x1, y1, x2, y2 } while actively dragging
   const zoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
+
+  // Exposes the floor plan's current on-screen bounding box (relative
+  // to the wrapper), so the parent can crop an export capture to just
+  // the floor plan instead of the whole viewport — which often has a
+  // lot of empty space around a centered floor plan of a different
+  // aspect ratio than the browser window.
+  useImperativeHandle(ref, () => ({
+    getFloorPlanBounds() {
+      const canvas = fpCanvasRef.current
+      if (!canvas) return null
+      const cw = parseFloat(canvas.style.width) || 0
+      const ch = parseFloat(canvas.style.height) || 0
+      if (!cw || !ch) return null
+      return {
+        left: panRef.current.x,
+        top: panRef.current.y,
+        width: cw * zoomRef.current,
+        height: ch * zoomRef.current,
+      }
+    },
+  }))
   // Caches the already-loaded floor plan source (image or rendered PDF
   // page) so that rotating doesn't have to re-fetch/re-render from
   // scratch every time — only redraw. Re-loading on rotation was what
@@ -603,7 +624,7 @@ export default function SurveyCanvas({
                           const newLabel = prompt('Rename device:', d.label)
                           if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
                         }}
-                        style={{ fontSize: Math.max(7, Math.round(sz * 0.3)), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: 'text' }}>
+                        style={{ fontSize: Math.max(d.dtype === 'rak-gw' ? 11 : 7, Math.round(sz * (d.dtype === 'rak-gw' ? 0.5 : 0.3))), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: 'text' }}>
                         {d.label}
                         {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
                       </div>
@@ -632,7 +653,9 @@ export default function SurveyCanvas({
       </div>
     </div>
   )
-}
+})
+
+export default SurveyCanvas
 
 const zoomBtn = {
   width: 28, height: 28, background: 'rgba(255,255,255,0.92)', border: '0.5px solid #ccc',

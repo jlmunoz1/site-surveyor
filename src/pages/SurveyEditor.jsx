@@ -72,6 +72,7 @@ export default function SurveyEditor() {
   const [portMapperSiteId, setPortMapperSiteId] = useState(null)
 
   const fileInputRef = useRef(null)
+  const canvasRef = useRef(null)
   const devicePhotoInputRef = useRef(null)
   const saveTimer = useRef(null)
 
@@ -343,7 +344,23 @@ export default function SurveyEditor() {
       await new Promise((res, rej) => { html2canvasScript.onload = res; html2canvasScript.onerror = rej; document.head.appendChild(html2canvasScript) })
       const canvasEl = document.querySelector('[data-export-canvas]')
       if (!canvasEl) { alert('Could not find canvas to export.'); setExportingPDF(false); return }
-      const rendered = await window.html2canvas(canvasEl, { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' })
+
+      // Crop the capture to just the floor plan's own bounding box
+      // (plus a small padding buffer) instead of the whole viewport,
+      // which usually has a lot of empty space around a centered floor
+      // plan whose aspect ratio doesn't match the browser window.
+      const bounds = canvasRef.current?.getFloorPlanBounds?.()
+      const PAD = 24
+      const captureOpts = { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' }
+      if (bounds) {
+        const elRect = canvasEl.getBoundingClientRect()
+        captureOpts.x = Math.max(0, Math.floor(bounds.left - PAD))
+        captureOpts.y = Math.max(0, Math.floor(bounds.top - PAD))
+        captureOpts.width = Math.min(elRect.width - captureOpts.x, Math.ceil(bounds.width + PAD * 2))
+        captureOpts.height = Math.min(elRect.height - captureOpts.y, Math.ceil(bounds.height + PAD * 2))
+      }
+
+      const rendered = await window.html2canvas(canvasEl, captureOpts)
       const imgData = rendered.toDataURL('image/png')
       const { jsPDF } = window.jspdf
       const pdf = new jsPDF({ orientation: rendered.width > rendered.height ? 'landscape' : 'portrait', unit: 'px', format: [rendered.width / 2, rendered.height / 2] })
@@ -603,6 +620,7 @@ export default function SurveyEditor() {
         )}
 
         <SurveyCanvas
+          ref={canvasRef}
           devices={devices} cables={cables} svgMarkup={svgMarkup}
           pxPerFt={pxPerFt} showHeatmap={showHeatmap}
           mode={mode} activeCableType={activeCableType}
