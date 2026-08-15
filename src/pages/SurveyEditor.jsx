@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getSurvey, getSurveyByToken, saveSurvey, createSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices } from '../lib/supabase'
+import { getSurvey, getSurveyByToken, saveSurvey, createSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices, updatePortMapperRackName } from '../lib/supabase'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
@@ -135,7 +135,7 @@ export default function SurveyEditor() {
     // Once created, remember its rack id on the device so we can pull
     // its equipment list back into Site Surveyor later.
     if (NETWORK_MAPPER_DTYPES.includes(d.dtype) && portMapperSiteId) {
-      createPortMapperRack(portMapperSiteId, d.label).then(({ rack, error }) => {
+      createPortMapperRack(portMapperSiteId, d.rackId || d.label).then(({ rack, error }) => {
         if (error) { console.warn('Port Mapper rack sync failed:', error); return }
         if (rack?.id) patchDeviceById(d.id, { portMapperRackId: rack.id })
       })
@@ -583,7 +583,15 @@ export default function SurveyEditor() {
                   <label style={propLabel}>Rack / site ID (optional)</label>
                   <input style={propInput} type="text" placeholder="e.g. RACK-04"
                     value={selectedDevice.rackId || ''}
-                    onChange={e => updateSelectedDevice('rackId', e.target.value)} />
+                    onChange={e => updateSelectedDevice('rackId', e.target.value)}
+                    onBlur={e => {
+                      const name = e.target.value.trim()
+                      if (name && selectedDevice.portMapperRackId) {
+                        updatePortMapperRackName(selectedDevice.portMapperRackId, name).then(({ error }) => {
+                          if (error) console.warn('Port Mapper rack rename failed:', error)
+                        })
+                      }
+                    }} />
                   <button onClick={() => setShowNetworkMapper(true)}
                     style={{ ...ghostBtnSmall, width: '100%', marginTop: 8, background: '#534AB7', color: '#fff', border: 'none' }}>
                     <i className="ti ti-topology-star-3" style={{ marginRight: 4 }} /> Open in Network Mapper

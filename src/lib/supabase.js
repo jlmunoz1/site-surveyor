@@ -157,6 +157,25 @@ export async function getPortMapperRackDevices(rackId) {
   }
 }
 
+// Renames an already-created rack in Port Mapper — used when someone
+// edits the "Rack / site ID" field after the rack was auto-created, so
+// Port Mapper's naming convention is respected instead of the generic
+// device label it started with.
+export async function updatePortMapperRackName(portMapperRackId, name) {
+  try {
+    const res = await fetch('/api/update-port-mapper-rack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rackId: portMapperRackId, name }),
+    })
+    const data = await res.json()
+    if (!res.ok) return { error: data.error || 'Failed to rename rack in Port Mapper' }
+    return { rack: data.rack, error: null }
+  } catch (err) {
+    return { error: err.message || 'Failed to reach Port Mapper' }
+  }
+}
+
 // ── Profiles (for "created by" display + admin) ────────────────────────
 export async function getProfiles() {
   return supabase.from('profiles').select('*')
