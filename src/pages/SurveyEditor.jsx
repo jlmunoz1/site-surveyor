@@ -1,9 +1,26 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getSurvey, getSurveyByToken, saveSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices } from '../lib/supabase'
+import { getSurvey, getSurveyByToken, saveSurvey, createSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices } from '../lib/supabase'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
+
+async function ensurePdfJsLoaded() {
+  if (window.pdfjsLib) return
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+    s.onload = resolve; s.onerror = reject
+    document.head.appendChild(s)
+  })
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+}
+
+async function getPdfPageCount(url) {
+  await ensurePdfJsLoaded()
+  const pdf = await window.pdfjsLib.getDocument(url).promise
+  return pdf.numPages
+}
 
 // Sage Port Mapper's stable production URL.
 const NETWORK_MAPPER_URL = 'https://sage-port-mapper.vercel.app'
@@ -40,6 +57,7 @@ export default function SurveyEditor() {
   const [svgMarkup, setSvgMarkup] = useState('')
   const [pxPerFt, setPxPerFt] = useState(4)
   const [floorPlanUrl, setFloorPlanUrl] = useState('')
+  const [floorPlanPage, setFloorPlanPage] = useState(1)
   const [floorPlanRotation, setFloorPlanRotation] = useState(0)
   const [iconSizes, setIconSizes] = useState({
     cameras: 16,
@@ -88,6 +106,7 @@ export default function SurveyEditor() {
     setPxPerFt(data.px_per_ft || 4)
     setScaleInput(String(data.px_per_ft || 4))
     setFloorPlanUrl(data.floor_plan_url || '')
+    setFloorPlanPage(data.floor_plan_page || 1)
     setFloorPlanRotation(data.floor_plan_rotation || 0)
     // If this survey belongs to a project that's synced to Port Mapper,
     // remember its site id so newly placed MDF/IDF/switches can get a
@@ -230,8 +249,36 @@ export default function SurveyEditor() {
     setSaving(true)
     const { url, error } = await uploadFloorPlan(id, file)
     if (error) { setError('Upload failed: ' + error.message); setSaving(false); return }
-    setFloorPlanUrl(url)
-    await saveSurvey(id, { floor_plan_url: url })
+
+    const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    let pageCount = 1
+    if (isPDF) {
+      try { pageCount = await getPdfPageCount(url) } catch (err) { console.warn('Could not read PDF page count:', err) }
+    }
+
+    if (pageCount > 1 && window.confirm(
+      `This PDF has ${pageCount} pages. Create ${pageCount - 1} additional survey(s) in this project — one per remaining page — so each floor is its own survey?`
+    )) {
+      setFloorPlanUrl(url); setFloorPlanPage(1)
+      await saveSurvey(id, { floor_plan_url: url, floor_plan_page: 1 })
+      let created = 0
+      for (let p = 2; p <= pageCount; p++) {
+        const { data: newSurvey, error: createErr } = await createSurvey(survey.user_id, `Floor ${p}`, survey.project_id || null)
+        if (createErr || !newSurvey) { console.warn(`Couldn't create survey for page ${p}:`, createErr); continue }
+        const { error: saveErr } = await saveSurvey(newSurvey.id, { floor_plan_url: url, floor_plan_page: p })
+        if (!saveErr) created++
+      }
+      setSaving(false)
+      setSaveMsg(created === pageCount - 1
+        ? `Created ${created} additional floor survey(s)`
+        : `Created ${created} of ${pageCount - 1} additional floor survey(s) — check for errors`)
+      setTimeout(() => setSaveMsg(''), 4000)
+      e.target.value = ''
+      return
+    }
+
+    setFloorPlanUrl(url); setFloorPlanPage(1)
+    await saveSurvey(id, { floor_plan_url: url, floor_plan_page: 1 })
     setSaving(false); setSaveMsg('Floor plan uploaded'); setTimeout(() => setSaveMsg(''), 2500)
     e.target.value = ''
   }
@@ -239,9 +286,10 @@ export default function SurveyEditor() {
   async function handleDeleteFloorPlan() {
     if (!window.confirm('Remove the floor plan from this survey?')) return
     setSaving(true)
-    await saveSurvey(id, { floor_plan_url: '', floor_plan_rotation: 0 })
+    await saveSurvey(id, { floor_plan_url: '', floor_plan_rotation: 0, floor_plan_page: 1 })
     setFloorPlanUrl('')
     setFloorPlanRotation(0)
+    setFloorPlanPage(1)
     setSaving(false); setSaveMsg('Floor plan removed'); setTimeout(() => setSaveMsg(''), 2000)
   }
 
@@ -505,6 +553,7 @@ export default function SurveyEditor() {
           onMarkupChange={updateMarkup}
           selectedId={selectedId} selectedCableId={selectedCableId}
           floorPlanUrl={floorPlanUrl}
+          floorPlanPage={floorPlanPage}
           floorPlanRotation={floorPlanRotation}
           iconSizes={iconSizes}
           calibrating={calibrating}

@@ -9,6 +9,7 @@ export default function SurveyCanvas({
   onMarkupChange,
   selectedId, selectedCableId,
   floorPlanUrl,
+  floorPlanPage = 1,
   floorPlanRotation = 0,
   iconSizes = { cameras: 16, lora: 20, network: 20, access: 16 },
   calibrating = false,
@@ -119,7 +120,7 @@ export default function SurveyCanvas({
       return
     }
 
-    if (loadedUrlRef.current === floorPlanUrl && loadedSourceRef.current) {
+    if (loadedUrlRef.current === `${floorPlanUrl}#${floorPlanPage}` && loadedSourceRef.current) {
       // Already loaded — just draw at the current rotation.
       drawFloorPlanAtRotation(floorPlanRotation)
       return
@@ -141,7 +142,8 @@ export default function SurveyCanvas({
           }
           window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
           const pdf = await window.pdfjsLib.getDocument(floorPlanUrl).promise
-          const page = await pdf.getPage(1)
+          const pageNum = Math.min(Math.max(1, floorPlanPage || 1), pdf.numPages)
+          const page = await pdf.getPage(pageNum)
           const RENDER_SCALE = 3
           const vp = page.getViewport({ scale: RENDER_SCALE })
           const raw = document.createElement('canvas')
@@ -152,7 +154,7 @@ export default function SurveyCanvas({
           await page.render({ canvasContext: raw.getContext('2d'), viewport: vp }).promise
 
           loadedSourceRef.current = { kind: 'pdf', canvas: raw, displayScale }
-          loadedUrlRef.current = floorPlanUrl
+          loadedUrlRef.current = `${floorPlanUrl}#${floorPlanPage}`
           drawFloorPlanAtRotation(floorPlanRotation)
         } catch (err) { console.error('PDF render error:', err) }
       }
@@ -162,7 +164,7 @@ export default function SurveyCanvas({
       img.crossOrigin = 'anonymous'
       const onReady = (image) => {
         loadedSourceRef.current = { kind: 'image', img: image }
-        loadedUrlRef.current = floorPlanUrl
+        loadedUrlRef.current = `${floorPlanUrl}#${floorPlanPage}`
         drawFloorPlanAtRotation(floorPlanRotation)
       }
       img.onload = () => onReady(img)
@@ -174,11 +176,11 @@ export default function SurveyCanvas({
       img.src = floorPlanUrl
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [floorPlanUrl])
+  }, [floorPlanUrl, floorPlanPage])
 
   // Redraw (no reload) whenever just the rotation changes
   useEffect(() => {
-    if (loadedUrlRef.current === floorPlanUrl && loadedSourceRef.current) {
+    if (loadedUrlRef.current === `${floorPlanUrl}#${floorPlanPage}` && loadedSourceRef.current) {
       drawFloorPlanAtRotation(floorPlanRotation)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
