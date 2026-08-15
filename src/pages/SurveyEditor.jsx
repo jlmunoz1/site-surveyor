@@ -158,16 +158,30 @@ export default function SurveyEditor() {
     updateSelectedDevice('photoUrl', url)
   }
   function handleDeviceMove(devId, x, y, newLabel) {
+    let renameTarget = null
     setDevices(prev => {
       const n = prev.map(d => {
         if (d.id !== devId) return d
         const updated = { ...d, x, y }
-        if (newLabel !== undefined) updated.label = newLabel
+        if (newLabel !== undefined) {
+          updated.label = newLabel
+          // If this MDF/IDF/switch already has a rack in Port Mapper and
+          // no separate Rack ID override is set, keep the rack's name in
+          // sync with the device's own label too.
+          if (NETWORK_MAPPER_DTYPES.includes(d.dtype) && d.portMapperRackId && !d.rackId) {
+            renameTarget = { rackId: d.portMapperRackId, name: newLabel }
+          }
+        }
         return updated
       })
       scheduleSave(n, cables, svgMarkup, pxPerFt)
       return n
     })
+    if (renameTarget) {
+      updatePortMapperRackName(renameTarget.rackId, renameTarget.name).then(({ error }) => {
+        if (error) console.warn('Port Mapper rack rename failed:', error)
+      })
+    }
   }
   function handleDeviceSelect(devId) { setSelectedId(devId); setSelectedCableId(null); setShowNetworkMapper(false) }
   function handleCableAdd(data) {
@@ -645,7 +659,18 @@ export default function SurveyEditor() {
                   <input style={propInput} type={f.type} placeholder={f.placeholder || ''}
                     min={f.type === 'number' ? 0 : undefined}
                     value={selectedDevice[f.field] ?? ''}
-                    onChange={e => updateSelectedDevice(f.field, f.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)} />
+                    onChange={e => updateSelectedDevice(f.field, f.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
+                    onBlur={f.field === 'label' ? e => {
+                      const name = e.target.value.trim()
+                      // Keep the rack's name in Port Mapper in sync with
+                      // the device's label, unless a separate Rack ID
+                      // override is set (that one wins instead).
+                      if (name && NETWORK_MAPPER_DTYPES.includes(selectedDevice.dtype) && selectedDevice.portMapperRackId && !selectedDevice.rackId) {
+                        updatePortMapperRackName(selectedDevice.portMapperRackId, name).then(({ error }) => {
+                          if (error) console.warn('Port Mapper rack rename failed:', error)
+                        })
+                      }
+                    } : undefined} />
                 </div>
               ))}
               <div>
