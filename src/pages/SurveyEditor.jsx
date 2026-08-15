@@ -348,6 +348,66 @@ export default function SurveyEditor() {
       const { jsPDF } = window.jspdf
       const pdf = new jsPDF({ orientation: rendered.width > rendered.height ? 'landscape' : 'portrait', unit: 'px', format: [rendered.width / 2, rendered.height / 2] })
       pdf.addImage(imgData, 'PNG', 0, 0, rendered.width / 2, rendered.height / 2)
+
+      // Network equipment key — one entry per MDF/IDF/switch on this
+      // floor, listing whatever equipment is inside its rack in Port
+      // Mapper (live, at export time).
+      const rackDevices = devices.filter(d => NETWORK_MAPPER_DTYPES.includes(d.dtype))
+      if (rackDevices.length > 0) {
+        const results = await Promise.all(
+          rackDevices.map(async d => {
+            if (!d.portMapperRackId) return { device: d, devices: null, error: null }
+            const r = await getPortMapperRackDevices(d.portMapperRackId)
+            return { device: d, devices: r.devices, error: r.error }
+          })
+        )
+
+        // ~100dpi "letter" page, consistent with px-unit doc set above.
+        pdf.addPage([850, 1100], 'portrait')
+        const pageH = 1100
+        const margin = 40
+        let y = margin
+
+        pdf.setTextColor(0, 0, 0)
+        pdf.setFontSize(16); pdf.setFont('helvetica', 'bold')
+        pdf.text('Network Equipment Key', margin, y)
+        y += 30
+
+        results.forEach(({ device, devices: equipment, error }) => {
+          if (y > pageH - 60) { pdf.addPage([850, 1100], 'portrait'); y = margin }
+          pdf.setFontSize(12); pdf.setFont('helvetica', 'bold')
+          const rackName = device.rackId || device.label
+          const heading = device.rackId && device.rackId !== device.label ? `${rackName} (${device.label})` : rackName
+          pdf.text(heading, margin, y)
+          y += 18
+          pdf.setFontSize(10); pdf.setFont('helvetica', 'normal')
+          if (!device.portMapperRackId) {
+            pdf.setTextColor(140, 140, 140)
+            pdf.text('Not yet linked to Network Mapper.', margin + 14, y)
+            pdf.setTextColor(0, 0, 0)
+            y += 16
+          } else if (error) {
+            pdf.setTextColor(160, 45, 45)
+            pdf.text(`Couldn't load equipment: ${error}`, margin + 14, y)
+            pdf.setTextColor(0, 0, 0)
+            y += 16
+          } else if (!equipment || equipment.length === 0) {
+            pdf.setTextColor(140, 140, 140)
+            pdf.text('No equipment added in Network Mapper yet.', margin + 14, y)
+            pdf.setTextColor(0, 0, 0)
+            y += 16
+          } else {
+            equipment.forEach(eq => {
+              if (y > pageH - 40) { pdf.addPage([850, 1100], 'portrait'); y = margin }
+              const line = eq.ports ? `•  ${eq.label}  (${eq.ports}p)` : `•  ${eq.label}`
+              pdf.text(line, margin + 14, y)
+              y += 16
+            })
+          }
+          y += 14
+        })
+      }
+
       pdf.save(`${survey?.name || 'survey'}.pdf`)
     } catch (err) { alert('Export failed: ' + err.message) }
     setExportingPDF(false)
