@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { v4 as uuidv4 } from 'uuid'
+import { getPdfPageCount } from '../lib/pdf'
 import {
   getSurveys, createSurvey, deleteSurvey, signOut,
   getProjects, createProject, deleteProject, getProfiles,
   syncProjectToPortMapper, setProjectPortMapperSiteId,
+  uploadFloorPlan, saveSurvey,
 } from '../lib/supabase'
 
 export default function Dashboard() {
@@ -15,6 +18,7 @@ export default function Dashboard() {
   const [profiles, setProfiles] = useState({}) // id -> { email, full_name }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
 
   // "mine" = only what I created. "team" = everyone else's.
   const [tab, setTab] = useState('mine')
@@ -32,6 +36,9 @@ export default function Dashboard() {
 
   // Expanded projects
   const [expanded, setExpanded] = useState({})
+  const [uploadingPlanFor, setUploadingPlanFor] = useState(null) // project id currently uploading
+  const floorPlanInputRef = useRef(null)
+  const pendingProjectRef = useRef(null)
 
   useEffect(() => {
     if (user) loadAll()
@@ -80,6 +87,53 @@ export default function Dashboard() {
     } else if (site?.id) {
       await setProjectPortMapperSiteId(data.id, site.id)
     }
+  }
+
+  function triggerFloorPlanUpload(project) {
+    pendingProjectRef.current = project
+    floorPlanInputRef.current.click()
+  }
+
+  async function handleFloorPlanFileChange(e) {
+    const file = e.target.files[0]
+    e.target.value = ''
+    const project = pendingProjectRef.current
+    pendingProjectRef.current = null
+    if (!file || !project) return
+
+    setError(''); setInfo('')
+    setUploadingPlanFor(project.id)
+    const tempId = uuidv4()
+    const { url, error: uploadErr } = await uploadFloorPlan(tempId, file)
+    if (uploadErr) { setError('Upload failed: ' + uploadErr.message); setUploadingPlanFor(null); return }
+
+    const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    let pageCount = 1
+    if (isPDF) {
+      try { pageCount = await getPdfPageCount(url) } catch (err) { console.warn('Could not read PDF page count:', err) }
+    }
+
+    if (pageCount > 1 && !window.confirm(
+      `This PDF has ${pageCount} pages. Create ${pageCount} surveys in "${project.name}" — one per floor?`
+    )) {
+      setUploadingPlanFor(null)
+      return
+    }
+
+    let created = 0
+    for (let p = 1; p <= pageCount; p++) {
+      const name = pageCount > 1 ? `Floor ${p}` : file.name.replace(/\.[^.]+$/, '')
+      const { data: newSurvey, error: createErr } = await createSurvey(user.id, name, project.id)
+      if (createErr || !newSurvey) { console.warn(`Couldn't create survey for page ${p}:`, createErr); continue }
+      const { error: saveErr } = await saveSurvey(newSurvey.id, { floor_plan_url: url, floor_plan_page: p })
+      if (!saveErr) created++
+    }
+    setUploadingPlanFor(null)
+    setInfo(created === pageCount
+      ? `Created ${created} survey${created !== 1 ? 's' : ''} from the floor plan`
+      : `Created ${created} of ${pageCount} survey(s) — check console for errors`)
+    setTimeout(() => setInfo(''), 4000)
+    loadAll()
   }
 
   async function handleDeleteProject(id, name) {
@@ -172,6 +226,8 @@ export default function Dashboard() {
         </div>
 
         {error && <p style={{ fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{error}</p>}
+        {info && <p style={{ fontSize: 12, color: '#0F6E56', background: '#E1F5EE', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{info}</p>}
+        <input ref={floorPlanInputRef} type="file" accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFloorPlanFileChange} />
 
         {/* New project form */}
         {showNewProject && (
@@ -228,6 +284,11 @@ export default function Dashboard() {
                     )}
                     <span style={{ flex: 1 }} />
                     <span style={{ fontSize: 11, color: '#888' }}>{projectSurveys.length} survey{projectSurveys.length !== 1 ? 's' : ''}</span>
+                    <button onClick={e => { e.stopPropagation(); triggerFloorPlanUpload(project) }}
+                      disabled={uploadingPlanFor === project.id}
+                      style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
+                      {uploadingPlanFor === project.id ? 'Uploading…' : '+ Floor plan'}
+                    </button>
                     <button onClick={e => { e.stopPropagation(); setNewSurveyProject(project.id); setShowNewSurvey(true) }}
                       style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>+ Survey</button>
                     {isMine && (
