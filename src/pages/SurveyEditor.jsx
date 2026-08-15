@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getSurvey, getSurveyByToken, saveSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack } from '../lib/supabase'
+import { getSurvey, getSurveyByToken, saveSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices } from '../lib/supabase'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
@@ -129,9 +129,12 @@ export default function SurveyEditor() {
     setSelectedId(d.id); setSelectedCableId(null)
     // Best-effort: auto-create a matching rack in Port Mapper for
     // MDF/IDF/switch devices, if this survey's project is synced there.
+    // Once created, remember its rack id on the device so we can pull
+    // its equipment list back into Site Surveyor later.
     if (NETWORK_MAPPER_DTYPES.includes(d.dtype) && portMapperSiteId) {
-      createPortMapperRack(portMapperSiteId, d.label).then(({ error }) => {
-        if (error) console.warn('Port Mapper rack sync failed:', error)
+      createPortMapperRack(portMapperSiteId, d.label).then(({ rack, error }) => {
+        if (error) { console.warn('Port Mapper rack sync failed:', error); return }
+        if (rack?.id) patchDeviceById(d.id, { portMapperRackId: rack.id })
       })
     }
   }
@@ -172,11 +175,36 @@ export default function SurveyEditor() {
   function handleCableSelect(cableId) { setSelectedCableId(cableId); setSelectedId(null) }
 
   const selectedDevice = devices.find(d => d.id === selectedId)
+  const [rackEquipment, setRackEquipment] = useState([])
+  const [loadingRackEquipment, setLoadingRackEquipment] = useState(false)
+  const [rackEquipmentError, setRackEquipmentError] = useState('')
+
+  const selectedRackId = selectedDevice?.portMapperRackId
+  useEffect(() => {
+    if (!selectedRackId) { setRackEquipment([]); setRackEquipmentError(''); return }
+    let cancelled = false
+    setLoadingRackEquipment(true)
+    getPortMapperRackDevices(selectedRackId).then(({ devices: eq, error }) => {
+      if (cancelled) return
+      setLoadingRackEquipment(false)
+      if (error) { setRackEquipmentError(error); setRackEquipment([]); return }
+      setRackEquipmentError('')
+      setRackEquipment(eq)
+    })
+    return () => { cancelled = true }
+  }, [selectedRackId])
   const selectedCable = cables.find(c => c.id === selectedCableId)
 
   function updateSelectedDevice(field, value) {
     setDevices(prev => {
       const n = prev.map(d => d.id === selectedId ? { ...d, [field]: value } : d)
+      scheduleSave(n, cables, svgMarkup, pxPerFt)
+      return n
+    })
+  }
+  function patchDeviceById(deviceId, changes) {
+    setDevices(prev => {
+      const n = prev.map(d => d.id === deviceId ? { ...d, ...changes } : d)
       scheduleSave(n, cables, svgMarkup, pxPerFt)
       return n
     })
@@ -527,6 +555,41 @@ export default function SurveyEditor() {
                     style={{ ...ghostBtnSmall, width: '100%', marginTop: 8, background: '#534AB7', color: '#fff', border: 'none' }}>
                     <i className="ti ti-topology-star-3" style={{ marginRight: 4 }} /> Open in Network Mapper
                   </button>
+                  {selectedDevice.portMapperRackId && (
+                    <div style={{ marginTop: 10, borderTop: '0.5px solid #D8D4F5', paddingTop: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 500, color: '#534AB7' }}>Equipment in rack</span>
+                        <button
+                          onClick={() => {
+                            setLoadingRackEquipment(true)
+                            getPortMapperRackDevices(selectedDevice.portMapperRackId).then(({ devices: eq, error }) => {
+                              setLoadingRackEquipment(false)
+                              if (error) { setRackEquipmentError(error); return }
+                              setRackEquipmentError(''); setRackEquipment(eq)
+                            })
+                          }}
+                          style={{ background: 'none', border: 'none', color: '#534AB7', cursor: 'pointer', fontSize: 10.5 }}>
+                          <i className="ti ti-refresh" /> Refresh
+                        </button>
+                      </div>
+                      {loadingRackEquipment ? (
+                        <p style={{ fontSize: 11, color: '#888', margin: 0 }}>Loading…</p>
+                      ) : rackEquipmentError ? (
+                        <p style={{ fontSize: 11, color: '#A32D2D', margin: 0 }}>Couldn't load: {rackEquipmentError}</p>
+                      ) : rackEquipment.length === 0 ? (
+                        <p style={{ fontSize: 11, color: '#aaa', margin: 0 }}>No equipment added in Network Mapper yet.</p>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {rackEquipment.map(eq => (
+                            <div key={eq.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff', border: '0.5px solid #E5E1F7', borderRadius: 5, padding: '4px 7px' }}>
+                              <span style={{ fontSize: 11.5, color: '#1a1a18' }}>{eq.label}</span>
+                              {eq.ports ? <span style={{ fontSize: 10, color: '#888' }}>{eq.ports}p</span> : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {[

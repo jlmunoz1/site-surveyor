@@ -143,6 +143,20 @@ export async function createPortMapperRack(siteId, name, { uSize, rackType } = {
   }
 }
 
+// Reads back the equipment (patch panels, switches, UPS, etc.) already
+// placed inside a given Port Mapper rack, so it can be shown read-only
+// in Site Surveyor's Properties panel.
+export async function getPortMapperRackDevices(rackId) {
+  try {
+    const res = await fetch(`/api/get-port-mapper-rack-devices?rackId=${encodeURIComponent(rackId)}`)
+    const data = await res.json()
+    if (!res.ok) return { error: data.error || 'Failed to load rack equipment' }
+    return { devices: data.devices || [], error: null }
+  } catch (err) {
+    return { error: err.message || 'Failed to reach Port Mapper' }
+  }
+}
+
 // ── Profiles (for "created by" display + admin) ────────────────────────
 export async function getProfiles() {
   return supabase.from('profiles').select('*')
