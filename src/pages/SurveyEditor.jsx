@@ -53,6 +53,7 @@ export default function SurveyEditor() {
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const [calibrating, setCalibrating] = useState(false)
+  const [measuring, setMeasuring] = useState(false)
   const [showCalibrateModal, setShowCalibrateModal] = useState(false)
   const [calibrateDistance, setCalibrateDistance] = useState('')
   const [calibratePixels, setCalibratePixels] = useState(0)
@@ -307,7 +308,14 @@ export default function SurveyEditor() {
   }
 
   function startCalibrate() {
+    setMeasuring(false)
     setCalibrating(true)
+    setMode('select')
+  }
+
+  function startMeasure() {
+    setCalibrating(false)
+    setMeasuring(true)
     setMode('select')
   }
 
@@ -535,6 +543,11 @@ export default function SurveyEditor() {
           title="Click two points on the floor plan to set the scale">
           <i className="ti ti-ruler-measure" /> {calibrating ? 'Drag a line…' : 'Set Scale'}
         </button>
+        <button style={{ ...tbBtn, ...(measuring ? { color: '#378ADD', borderColor: '#378ADD', background: '#E9F2FC' } : {}) }}
+          onClick={() => measuring ? setMeasuring(false) : startMeasure()}
+          title="Drag a line to measure a distance in feet">
+          <i className="ti ti-ruler-3" /> {measuring ? 'Drag to measure…' : 'Measure'}
+        </button>
         <button style={tbBtn} onClick={() => setShowScale(true)} title="Manually enter px/ft">
           <i className="ti ti-adjustments" /> {pxPerFt} px/ft
         </button>
@@ -633,6 +646,7 @@ export default function SurveyEditor() {
           floorPlanRotation={floorPlanRotation}
           iconSizes={iconSizes}
           calibrating={calibrating}
+          measuring={measuring}
           onCalibrateDrag={handleCalibrateDrag}
         />
 

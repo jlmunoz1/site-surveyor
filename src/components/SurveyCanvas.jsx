@@ -13,6 +13,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   floorPlanRotation = 0,
   iconSizes = { cameras: 16, lora: 20, network: 20, access: 16 },
   calibrating = false,
+  measuring = false,
   onCalibrateDrag,
 }, ref) {
   const wrapRef = useRef(null)
@@ -31,6 +32,14 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   const isCalibratingDrag = useRef(false)
   const calibStartRef = useRef({ x: 0, y: 0 })
   const [calibDrag, setCalibDrag] = useState(null) // { x1, y1, x2, y2 } while actively dragging
+  const isMeasuringDrag = useRef(false)
+  const measureStartRef = useRef({ x: 0, y: 0 })
+  const [measureLine, setMeasureLine] = useState(null) // { x1, y1, x2, y2, distFt } — persists after mouseup so it can be read
+
+  // Clear the measurement line whenever the tool is switched off
+  useEffect(() => {
+    if (!measuring) setMeasureLine(null)
+  }, [measuring])
   const zoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
 
@@ -337,6 +346,15 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       return
     }
 
+    // Measure mode — click and drag a line to read its length in feet
+    if (measuring && e.button === 0) {
+      const { x, y } = toCanvas(e.clientX, e.clientY)
+      isMeasuringDrag.current = true
+      measureStartRef.current = { x, y }
+      setMeasureLine({ x1: x, y1: y, x2: x, y2: y, distFt: 0 })
+      return
+    }
+
     // Click-and-hold to pan: middle-click or Alt+click always pans.
     // In select mode (the grab-hand cursor), a plain left-click-and-hold
     // on empty canvas also pans — mouseup below decides whether it ended
@@ -393,6 +411,15 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       setCalibDrag({ x1: calibStartRef.current.x, y1: calibStartRef.current.y, x2: x, y2: y })
       return
     }
+    if (isMeasuringDrag.current) {
+      const { x, y } = toCanvas(e.clientX, e.clientY)
+      const start = measureStartRef.current
+      const dx = x - start.x, dy = y - start.y
+      const pixelDist = Math.sqrt(dx * dx + dy * dy)
+      const distFt = pxPerFt > 0 ? pixelDist / pxPerFt : 0
+      setMeasureLine({ x1: start.x, y1: start.y, x2: x, y2: y, distFt })
+      return
+    }
     if (isPanning.current) {
       // Locked at the fitted 1x baseline — dragging shouldn't move
       // the floor plan until the user has zoomed in.
@@ -420,6 +447,12 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   }
 
   function handleWrapMouseUp(e) {
+    if (isMeasuringDrag.current) {
+      isMeasuringDrag.current = false
+      // Leave the line + reading on screen so it can actually be read;
+      // it clears on the next drag or when the tool is switched off.
+      return
+    }
     if (isCalibratingDrag.current) {
       isCalibratingDrag.current = false
       const start = calibStartRef.current
@@ -550,7 +583,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         ref={wrapRef}
         style={{
           width: '100%', height: '100%', position: 'relative', overflow: 'hidden',
-          cursor: calibrating ? 'crosshair' : isPanning.current ? 'grabbing' : mode === 'select' ? 'grab' : 'crosshair',
+          cursor: (calibrating || measuring) ? 'crosshair' : isPanning.current ? 'grabbing' : mode === 'select' ? 'grab' : 'crosshair',
           background: 'repeating-linear-gradient(0deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px),repeating-linear-gradient(90deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px)'
         }}
         data-export-canvas="true"
@@ -645,6 +678,30 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                 stroke="#E24B4A" strokeWidth={2 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`} />
               <circle cx={calibDrag.x2} cy={calibDrag.y2} r={6 / zoom} fill="#E24B4A" stroke="#fff" strokeWidth={2 / zoom} />
             </svg>
+          </div>
+        )}
+
+        {/* Measurement overlay — line + live distance reading, stays
+            visible after mouseup so it can actually be read */}
+        {measureLine && (
+          <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', pointerEvents: 'none', zIndex: 20 }}>
+            <svg style={{ overflow: 'visible', position: 'absolute', top: 0, left: 0 }}>
+              <circle cx={measureLine.x1} cy={measureLine.y1} r={6 / zoom} fill="#378ADD" stroke="#fff" strokeWidth={2 / zoom} />
+              <line x1={measureLine.x1} y1={measureLine.y1} x2={measureLine.x2} y2={measureLine.y2}
+                stroke="#378ADD" strokeWidth={2.5 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`} />
+              <circle cx={measureLine.x2} cy={measureLine.y2} r={6 / zoom} fill="#378ADD" stroke="#fff" strokeWidth={2 / zoom} />
+            </svg>
+            <div style={{
+              position: 'absolute',
+              left: (measureLine.x1 + measureLine.x2) / 2,
+              top: (measureLine.y1 + measureLine.y2) / 2,
+              transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+              transformOrigin: 'center',
+              background: '#378ADD', color: '#fff', fontSize: 12, fontWeight: 600,
+              padding: '3px 8px', borderRadius: 5, whiteSpace: 'nowrap', boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+            }}>
+              {measureLine.distFt.toFixed(1)} ft
+            </div>
           </div>
         )}
 
