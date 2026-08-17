@@ -8,6 +8,7 @@ import {
   getProjects, createProject, deleteProject, getProfiles,
   syncProjectToPortMapper, setProjectPortMapperSiteId,
   uploadFloorPlan, saveSurvey,
+  getProjectMembers, inviteToProject, removeProjectMember,
 } from '../lib/supabase'
 
 export default function Dashboard() {
@@ -37,6 +38,12 @@ export default function Dashboard() {
   // Expanded projects
   const [expanded, setExpanded] = useState({})
   const [uploadingPlanFor, setUploadingPlanFor] = useState(null) // project id currently uploading
+  const [shareProject, setShareProject] = useState(null) // project object currently being shared
+  const [members, setMembers] = useState([])
+  const [loadingMembers, setLoadingMembers] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviting, setInviting] = useState(false)
+  const [inviteError, setInviteError] = useState('')
   const floorPlanInputRef = useRef(null)
   const pendingProjectRef = useRef(null)
 
@@ -134,6 +141,35 @@ export default function Dashboard() {
       : `Created ${created} of ${pageCount} survey(s) — check console for errors`)
     setTimeout(() => setInfo(''), 4000)
     loadAll()
+  }
+
+  async function openShareModal(project) {
+    setShareProject(project)
+    setInviteEmail(''); setInviteError('')
+    setLoadingMembers(true)
+    const { data } = await getProjectMembers(project.id)
+    setMembers(data || [])
+    setLoadingMembers(false)
+  }
+
+  async function handleInvite(e) {
+    e.preventDefault()
+    if (!inviteEmail.trim()) return
+    setInviting(true); setInviteError('')
+    const { data, error } = await inviteToProject(shareProject.id, inviteEmail, user.id)
+    setInviting(false)
+    if (error) {
+      setInviteError(error.message.includes('duplicate') ? 'Already invited.' : error.message)
+      return
+    }
+    setMembers(m => [...m, data])
+    setInviteEmail('')
+  }
+
+  async function handleRemoveMember(id) {
+    const { error } = await removeProjectMember(id)
+    if (error) { setInviteError(error.message); return }
+    setMembers(m => m.filter(x => x.id !== id))
   }
 
   async function handleDeleteProject(id, name) {
@@ -292,6 +328,12 @@ export default function Dashboard() {
                     <button onClick={e => { e.stopPropagation(); setNewSurveyProject(project.id); setShowNewSurvey(true) }}
                       style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>+ Survey</button>
                     {isMine && (
+                      <button onClick={e => { e.stopPropagation(); openShareModal(project) }}
+                        style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
+                        <i className="ti ti-user-plus" style={{ marginRight: 3 }} /> Share
+                      </button>
+                    )}
+                    {isMine && (
                       <button onClick={e => { e.stopPropagation(); handleDeleteProject(project.id, project.name) }}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ccc', fontSize: 14, padding: '2px 4px' }}>
                         <i className="ti ti-trash" />
@@ -343,6 +385,51 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {shareProject && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}
+          onClick={e => { if (e.target === e.currentTarget) setShareProject(null) }}>
+          <div style={{ background: '#fff', borderRadius: 12, width: 400, border: '0.5px solid #e0dfd8', padding: '22px 24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1a1a18', margin: 0 }}>Share "{shareProject.name}"</h2>
+              <button onClick={() => setShareProject(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888', fontSize: 16 }}>
+                <i className="ti ti-x" />
+              </button>
+            </div>
+            <p style={{ fontSize: 12, color: '#888', margin: '0 0 16px' }}>
+              Invited contractors will only see this project — not your whole team's projects. Staff accounts (no access limit set) already see everything, so inviting them here isn't necessary.
+            </p>
+
+            <form onSubmit={handleInvite} style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+              <input type="email" required placeholder="contractor@email.com" value={inviteEmail}
+                onChange={e => setInviteEmail(e.target.value)}
+                style={{ flex: 1, padding: '7px 10px', fontSize: 13, border: '0.5px solid #ccc', borderRadius: 8, outline: 'none' }} />
+              <button type="submit" disabled={inviting} style={primaryBtn}>{inviting ? 'Inviting…' : 'Invite'}</button>
+            </form>
+            {inviteError && <p style={{ fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '7px 10px', borderRadius: 6, marginBottom: 12 }}>{inviteError}</p>}
+
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 }}>
+              Invited ({members.length})
+            </div>
+            {loadingMembers ? (
+              <p style={{ fontSize: 12, color: '#888' }}>Loading…</p>
+            ) : members.length === 0 ? (
+              <p style={{ fontSize: 12, color: '#aaa' }}>No one invited yet.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+                {members.map(m => (
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8f8f6', border: '0.5px solid #e0dfd8', borderRadius: 7, padding: '6px 10px' }}>
+                    <span style={{ fontSize: 12.5, color: '#1a1a18' }}>{m.email}</span>
+                    <button onClick={() => handleRemoveMember(m.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A32D2D', fontSize: 11 }}>
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

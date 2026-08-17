@@ -101,6 +101,20 @@ export async function deleteProject(id) {
   return { error }
 }
 
+// ── Project invitations ─────────────────────────────────────────────────
+export async function getProjectMembers(projectId) {
+  return supabase.from('project_members').select('*').eq('project_id', projectId).order('created_at')
+}
+
+export async function inviteToProject(projectId, email, invitedBy) {
+  return supabase.from('project_members').insert({ project_id: projectId, email: email.trim().toLowerCase(), invited_by: invitedBy }).select().single()
+}
+
+export async function removeProjectMember(id) {
+  const { error } = await supabase.from('project_members').delete().eq('id', id)
+  return { error }
+}
+
 export async function setProjectPortMapperSiteId(projectId, siteId) {
   return supabase.from('projects').update({ port_mapper_site_id: siteId }).eq('id', projectId)
 }
