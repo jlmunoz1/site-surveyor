@@ -12,9 +12,11 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   floorPlanPage = 1,
   floorPlanRotation = 0,
   iconSizes = { cameras: 16, lora: 20, network: 20, access: 16 },
+  labelSizes = { cameras: 10, lora: 13, network: 10, access: 10 },
   calibrating = false,
   measuring = false,
   onCalibrateDrag,
+  readOnly = false,
 }, ref) {
   const wrapRef = useRef(null)
   const fpCanvasRef = useRef(null)
@@ -337,6 +339,10 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   function handleWrapMouseDown(e) {
     if (e.target.closest('.sv-device')) return
 
+    // Read-only (shared link) view — allow panning/zooming to look
+    // around, but no drawing of any kind.
+    if (readOnly && mode !== 'select') return
+
     // Calibration mode — click and drag a line across a known distance
     if (calibrating && e.button === 0) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
@@ -496,6 +502,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     }
     if (mode !== 'select') return
     onDeviceSelect(device.id)
+    if (readOnly) return
     const rect = wrapRef.current.getBoundingClientRect()
     const startX = (e.clientX - rect.left - panRef.current.x) / zoomRef.current - device.x
     const startY = (e.clientY - rect.top - panRef.current.y) / zoomRef.current - device.y
@@ -561,9 +568,22 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   function getSizeForDevice(dtype) {
     if (['reolink-fe','cam-dome','cam-bullet'].includes(dtype)) return iconSizes.cameras || 16
     if (['rak-gw','rak-node'].includes(dtype)) return iconSizes.lora || 20
-    if (['mdf','idf','switch','ap','nvr'].includes(dtype)) return iconSizes.network || 20
+    if (['mdf','idf','switch','ap','nvr','sage-equip'].includes(dtype)) return iconSizes.network || 20
     if (['reader','intercom'].includes(dtype)) return iconSizes.access || 16
     return 16
+  }
+
+  // Label font size is fully independent of icon size — previously it
+  // was derived as a multiple of icon size, which meant shrinking the
+  // icon (e.g. to fit a small imported floor plan) also shrank the
+  // label, and below a certain icon size the label disappeared
+  // entirely rather than just getting smaller.
+  function getLabelSizeForDevice(dtype) {
+    if (['reolink-fe','cam-dome','cam-bullet'].includes(dtype)) return labelSizes.cameras || 10
+    if (['rak-gw','rak-node'].includes(dtype)) return labelSizes.lora || 13
+    if (['mdf','idf','switch','ap','nvr','sage-equip'].includes(dtype)) return labelSizes.network || 10
+    if (['reader','intercom'].includes(dtype)) return labelSizes.access || 10
+    return 10
   }
 
   const transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
@@ -597,7 +617,8 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', willChange: 'transform' }}>
           <canvas ref={fpCanvasRef} style={{ position: 'absolute', top: 0, left: 0, opacity: 0.85, pointerEvents: 'none' }} />
 
-          <svg ref={drawSvgRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}>
+          {/* Cables — fully React-rendered from state */}
+          <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}>
             {cables.map(c => {
               const cs = CABLE_STYLES[c.type] || CABLE_STYLES.cat6
               const sw = cs.width / zoom
@@ -616,6 +637,17 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               return <line x1={tempLine.x1} y1={tempLine.y1} x2={tempLine.x2} y2={tempLine.y2} stroke={cs.stroke} strokeWidth={cs.width / zoom} strokeDasharray={cs.dash || undefined} opacity="0.5" />
             })()}
           </svg>
+
+          {/* Walls / rooms / labels / redlines — deliberately given ZERO
+              children in JSX (and never given any) so React never
+              reconciles this element's contents. All drawing happens
+              imperatively via drawSvgRef (appendChild / innerHTML).
+              Sharing this element with React-rendered content used to
+              cause React to wipe out anything drawn here on the very
+              next re-render — which happens on almost every mouse
+              move — making walls/rooms/labels/redlines appear to draw
+              successfully but never actually show up. */}
+          <svg ref={drawSvgRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }} />
 
           {devices.map(d => (
             <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
@@ -649,19 +681,18 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                         </div>
                       )}
                     </div>
-                    {sz >= 14 && (
-                      <div
-                        title="Double-click to rename"
-                        onDoubleClick={e => {
-                          e.stopPropagation()
-                          const newLabel = prompt('Rename device:', d.label)
-                          if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
-                        }}
-                        style={{ fontSize: Math.max(d.dtype === 'rak-gw' ? 11 : 7, Math.round(sz * (d.dtype === 'rak-gw' ? 0.5 : 0.3))), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: 'text' }}>
-                        {d.label}
-                        {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
-                      </div>
-                    )}
+                    <div
+                      title="Double-click to rename"
+                      onDoubleClick={e => {
+                        e.stopPropagation()
+                        if (readOnly) return
+                        const newLabel = prompt('Rename device:', d.label)
+                        if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
+                      }}
+                      style={{ fontSize: getLabelSizeForDevice(d.dtype), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: readOnly ? 'default' : 'text' }}>
+                      {d.label}
+                      {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
+                    </div>
                   </>
                 )
               })()}

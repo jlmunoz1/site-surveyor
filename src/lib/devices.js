@@ -17,11 +17,12 @@ export const DEVICE_DEFS = [
   {
     section: 'Network',
     items: [
-      { dtype: 'mdf',    label: 'MDF',          color: '#534AB7', coverage: 0,  heatmap: false },
-      { dtype: 'idf',    label: 'IDF',          color: '#7F77DD', coverage: 0,  heatmap: false },
+      { dtype: 'mdf',    label: 'MDF',          color: '#C21E7A', coverage: 0,  heatmap: false },
+      { dtype: 'idf',    label: 'IDF',          color: '#E85BAE', coverage: 0,  heatmap: false },
       { dtype: 'switch', label: 'PoE Switch',   color: '#3C3489', coverage: 0,  heatmap: false },
       { dtype: 'ap',     label: 'Access Point', color: '#534AB7', coverage: 80, heatmap: false },
       { dtype: 'nvr',    label: 'NVR/DVR',      color: '#26215C', coverage: 0,  heatmap: false },
+      { dtype: 'sage-equip', label: 'Sage Equipment', color: '#1A2E4A', coverage: 0, heatmap: false },
     ]
   },
   {
@@ -74,6 +75,7 @@ export function getIconPaths(dtype, color) {
     'switch':     `<rect x="3" y="10" width="28" height="14" rx="2.5" fill="${c}18" stroke="${c}" stroke-width="2"/><circle cx="9" cy="17" r="2.5" fill="${c}"/><circle cx="17" cy="17" r="2.5" fill="${c}"/><circle cx="25" cy="17" r="2.5" fill="${c}" opacity=".35"/>`,
     'ap':         `<path d="M7 21 Q17 9 27 21" fill="none" stroke="${c}" stroke-width="1.8"/><path d="M11 25 Q17 17 23 25" fill="none" stroke="${c}" stroke-width="1.8"/><circle cx="17" cy="27" r="2.5" fill="${c}"/>`,
     'nvr':        `<rect x="3" y="9" width="28" height="16" rx="3" fill="${c}18" stroke="${c}" stroke-width="2"/><rect x="6" y="12" width="9" height="10" rx="1.5" fill="${c}" opacity=".2" stroke="${c}" stroke-width="1.5"/><circle cx="21" cy="17" r="3" fill="${c}" opacity=".5"/><circle cx="27" cy="12" r="1.5" fill="${c}"/>`,
+    'sage-equip': `<path d="M17 4 L28 8 L28 16 Q28 25 17 30 Q6 25 6 16 L6 8 Z" fill="${c}18" stroke="${c}" stroke-width="2"/><path d="M11.5 17 L15.5 21 L23 12.5" fill="none" stroke="${c}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`,
     'reader':     `<rect x="8" y="5" width="18" height="24" rx="3" fill="${c}18" stroke="${c}" stroke-width="2"/><rect x="11" y="10" width="12" height="7" rx="1.5" fill="none" stroke="${c}" stroke-width="1.5"/><line x1="11" y1="21" x2="23" y2="21" stroke="${c}" stroke-width="1.2" opacity=".6"/>`,
     'intercom':   `<path d="M10 7 Q7 7 7 10 L7 17 Q7 25 17 25 Q27 25 27 17 L27 10 Q27 7 24 7 Z" fill="${c}18" stroke="${c}" stroke-width="2"/><circle cx="17" cy="15" r="4" fill="none" stroke="${c}" stroke-width="1.5"/>`,
   }

@@ -49,6 +49,12 @@ export default function SurveyEditor() {
     network: 20,
     access: 16,
   })
+  const [labelSizes, setLabelSizes] = useState({
+    cameras: 10,
+    lora: 13,
+    network: 10,
+    access: 10,
+  })
   const [exportingPDF, setExportingPDF] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
@@ -58,7 +64,7 @@ export default function SurveyEditor() {
   const [calibrateDistance, setCalibrateDistance] = useState('')
   const [calibratePixels, setCalibratePixels] = useState(0)
 
-  const [mode, setMode] = useState(isShared ? 'redline' : 'select')
+  const [mode, setMode] = useState('select')
   const [activeCableType, setActiveCableType] = useState('cat6')
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
@@ -104,6 +110,9 @@ export default function SurveyEditor() {
     if (data.icon_sizes) {
       setIconSizes(typeof data.icon_sizes === 'object' ? data.icon_sizes : {cameras:16,lora:20,network:20,access:16})
     }
+    if (data.label_sizes) {
+      setLabelSizes(typeof data.label_sizes === 'object' ? data.label_sizes : {cameras:10,lora:13,network:10,access:10})
+    }
     setLoading(false)
   }
 
@@ -126,6 +135,12 @@ export default function SurveyEditor() {
     const newSizes = { ...iconSizes, [category]: v }
     setIconSizes(newSizes)
     saveSurvey(id, { icon_sizes: newSizes })
+  }
+  function updateLabelSize(category, s) {
+    const v = Math.max(6, Math.min(60, s))
+    const newSizes = { ...labelSizes, [category]: v }
+    setLabelSizes(newSizes)
+    saveSurvey(id, { label_sizes: newSizes })
   }
 
   function handleDeviceAdd(data) {
@@ -455,14 +470,16 @@ export default function SurveyEditor() {
     return Object.values(grouped)
   }
 
-  const toolbarModes = [
-    { id: 'select',  icon: 'cursor-text', label: 'Select'  },
-    { id: 'cable',   icon: 'timeline',    label: 'Cable'   },
-    { id: 'wall',    icon: 'pencil',      label: 'Wall'    },
-    { id: 'room',    icon: 'square',      label: 'Room'    },
-    { id: 'label',   icon: 'text-size',   label: 'Label'   },
-    { id: 'redline', icon: 'scribble',    label: 'Redline' },
-  ]
+  const toolbarModes = isShared
+    ? [{ id: 'select', icon: 'cursor-text', label: 'Select' }]
+    : [
+        { id: 'select',  icon: 'cursor-text', label: 'Select'  },
+        { id: 'cable',   icon: 'timeline',    label: 'Cable'   },
+        { id: 'wall',    icon: 'pencil',      label: 'Wall'    },
+        { id: 'room',    icon: 'square',      label: 'Room'    },
+        { id: 'label',   icon: 'text-size',   label: 'Label'   },
+        { id: 'redline', icon: 'scribble',    label: 'Redline' },
+      ]
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 14, color: '#888' }}>Loading survey…</div>
   if (error) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 14, color: '#A32D2D' }}>{error}</div>
@@ -494,7 +511,7 @@ export default function SurveyEditor() {
             {survey?.name} <i className="ti ti-pencil" style={{ fontSize: 10, color: '#aaa', verticalAlign: '0px' }} />
           </span>
         )}
-        {isShared && <span style={{ background: '#E24B4A', color: '#fff', fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 500 }}>Redline view</span>}
+        {isShared && <span style={{ background: '#666', color: '#fff', fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 500 }}>View only</span>}
         <div style={{ width: '0.5px', height: 22, background: '#e0dfd8', margin: '0 2px' }} />
 
         {!isShared && (
@@ -538,19 +555,23 @@ export default function SurveyEditor() {
           onClick={() => setShowHeatmap(h => !h)}>
           <i className="ti ti-wave-sine" /> Heat Map
         </button>
-        <button style={{ ...tbBtn, ...(calibrating ? { color: '#E24B4A', borderColor: '#E24B4A', background: '#FCEBEB' } : {}) }}
-          onClick={() => calibrating ? setCalibrating(false) : startCalibrate()}
-          title="Click two points on the floor plan to set the scale">
-          <i className="ti ti-ruler-measure" /> {calibrating ? 'Drag a line…' : 'Set Scale'}
-        </button>
+        {!isShared && (
+          <button style={{ ...tbBtn, ...(calibrating ? { color: '#E24B4A', borderColor: '#E24B4A', background: '#FCEBEB' } : {}) }}
+            onClick={() => calibrating ? setCalibrating(false) : startCalibrate()}
+            title="Click two points on the floor plan to set the scale">
+            <i className="ti ti-ruler-measure" /> {calibrating ? 'Drag a line…' : 'Set Scale'}
+          </button>
+        )}
         <button style={{ ...tbBtn, ...(measuring ? { color: '#378ADD', borderColor: '#378ADD', background: '#E9F2FC' } : {}) }}
           onClick={() => measuring ? setMeasuring(false) : startMeasure()}
           title="Drag a line to measure a distance in feet">
           <i className="ti ti-ruler-3" /> {measuring ? 'Drag to measure…' : 'Measure'}
         </button>
-        <button style={tbBtn} onClick={() => setShowScale(true)} title="Manually enter px/ft">
-          <i className="ti ti-adjustments" /> {pxPerFt} px/ft
-        </button>
+        {!isShared && (
+          <button style={tbBtn} onClick={() => setShowScale(true)} title="Manually enter px/ft">
+            <i className="ti ti-adjustments" /> {pxPerFt} px/ft
+          </button>
+        )}
         {!isShared && <button style={tbBtn} onClick={() => setShowBOM(true)}><i className="ti ti-clipboard-list" /> BOM</button>}
         {!isShared && (
           <button style={{ ...tbBtn, color: '#185FA5', borderColor: '#185FA5' }} onClick={handleShare}>
@@ -564,6 +585,7 @@ export default function SurveyEditor() {
         )}
         <div style={{ width: '0.5px', height: 22, background: '#e0dfd8' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 9.5, color: '#aaa', textTransform: 'uppercase', letterSpacing: '.04em' }}>Icon size</span>
           {[
             { key: 'cameras', label: 'Cam' },
             { key: 'lora',    label: 'LoRa' },
@@ -572,13 +594,33 @@ export default function SurveyEditor() {
           ].map(({ key, label }) => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: 10, color: '#888', minWidth: 32 }}>{label}</span>
-              <input type="range" min="4" max="60" step="2"
+              <input type="number" min="4" max="80" step="1"
                 value={iconSizes[key] || 16}
-                onChange={e => { const v = parseInt(e.target.value); setIconSizes(s => ({...s, [key]: v})) }}
-                onMouseUp={e => updateIconSize(key, parseInt(e.target.value))}
-                onTouchEnd={e => updateIconSize(key, parseInt(e.target.value))}
-                style={{ width: 52 }} title={label + ' icon size'} />
-              <span style={{ fontSize: 10, color: '#888', minWidth: 20 }}>{iconSizes[key] || 16}</span>
+                onChange={e => { const v = parseInt(e.target.value) || 4; setIconSizes(s => ({...s, [key]: v})) }}
+                onBlur={e => updateIconSize(key, parseInt(e.target.value) || 4)}
+                style={{ width: 44, fontSize: 11, padding: '3px 5px', border: '0.5px solid #ccc', borderRadius: 5 }}
+                title={label + ' icon size (px)'} />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ width: '0.5px', height: 22, background: '#e0dfd8' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 9.5, color: '#aaa', textTransform: 'uppercase', letterSpacing: '.04em' }}>Label size</span>
+          {[
+            { key: 'cameras', label: 'Cam' },
+            { key: 'lora',    label: 'LoRa' },
+            { key: 'network', label: 'Net' },
+            { key: 'access',  label: 'Access' },
+          ].map(({ key, label }) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 10, color: '#888', minWidth: 32 }}>{label}</span>
+              <input type="number" min="6" max="60" step="1"
+                value={labelSizes[key] || 10}
+                onChange={e => { const v = parseInt(e.target.value) || 6; setLabelSizes(s => ({...s, [key]: v})) }}
+                onBlur={e => updateLabelSize(key, parseInt(e.target.value) || 6)}
+                style={{ width: 44, fontSize: 11, padding: '3px 5px', border: '0.5px solid #ccc', borderRadius: 5 }}
+                title={label + ' label font size (px)'} />
             </div>
           ))}
         </div>
@@ -645,9 +687,11 @@ export default function SurveyEditor() {
           floorPlanPage={floorPlanPage}
           floorPlanRotation={floorPlanRotation}
           iconSizes={iconSizes}
+          labelSizes={labelSizes}
           calibrating={calibrating}
           measuring={measuring}
           onCalibrateDrag={handleCalibrateDrag}
+          readOnly={isShared}
         />
 
         <div style={{ width: 172, flexShrink: 0, background: '#f8f8f6', borderLeft: '0.5px solid #e0dfd8', padding: 12, overflowY: 'auto' }}>
@@ -662,6 +706,7 @@ export default function SurveyEditor() {
               <div>
                 <label style={propLabel}>Status</label>
                 <select style={propInput} value={selectedDevice.status || 'existing'}
+                  disabled={isShared}
                   onChange={e => updateSelectedDevice('status', e.target.value)}>
                   {Object.entries(DEVICE_STATUSES).map(([key, s]) => (
                     <option key={key} value={key}>{s.label}</option>
@@ -672,12 +717,14 @@ export default function SurveyEditor() {
                 <label style={propLabel}>Color</label>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input type="color" value={selectedDevice.color || '#378ADD'}
+                    disabled={isShared}
                     onChange={e => updateSelectedDevice('color', e.target.value)}
-                    style={{ width: 34, height: 30, padding: 2, border: '0.5px solid #ccc', borderRadius: 6, cursor: 'pointer', background: '#fff' }} />
+                    style={{ width: 34, height: 30, padding: 2, border: '0.5px solid #ccc', borderRadius: 6, cursor: isShared ? 'default' : 'pointer', background: '#fff' }} />
                   <input style={{ ...propInput, flex: 1 }} type="text" value={selectedDevice.color || ''}
+                    disabled={isShared}
                     onChange={e => updateSelectedDevice('color', e.target.value)} placeholder="#378ADD" />
                 </div>
-                {getDefaultDeviceColor(selectedDevice.dtype) && selectedDevice.color !== getDefaultDeviceColor(selectedDevice.dtype) && (
+                {!isShared && getDefaultDeviceColor(selectedDevice.dtype) && selectedDevice.color !== getDefaultDeviceColor(selectedDevice.dtype) && (
                   <button onClick={() => updateSelectedDevice('color', getDefaultDeviceColor(selectedDevice.dtype))}
                     style={{ background: 'none', border: 'none', color: '#378ADD', cursor: 'pointer', fontSize: 11, padding: '4px 0 0' }}>
                     Reset to default
@@ -689,6 +736,7 @@ export default function SurveyEditor() {
                   <label style={propLabel}>Rack / site ID (optional)</label>
                   <input style={propInput} type="text" placeholder="e.g. RACK-04"
                     value={selectedDevice.rackId || ''}
+                    disabled={isShared}
                     onChange={e => updateSelectedDevice('rackId', e.target.value)}
                     onBlur={e => {
                       const name = e.target.value.trim()
@@ -751,6 +799,7 @@ export default function SurveyEditor() {
                   <input style={propInput} type={f.type} placeholder={f.placeholder || ''}
                     min={f.type === 'number' ? 0 : undefined}
                     value={selectedDevice[f.field] ?? ''}
+                    disabled={isShared}
                     onChange={e => updateSelectedDevice(f.field, f.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
                     onBlur={f.field === 'label' ? e => {
                       const name = e.target.value.trim()
@@ -768,8 +817,10 @@ export default function SurveyEditor() {
               <div>
                 <label style={propLabel}>Notes</label>
                 <textarea style={{ ...propInput, minHeight: 48, resize: 'vertical' }} placeholder="Mount height, port…"
+                  disabled={isShared}
                   value={selectedDevice.notes || ''} onChange={e => updateSelectedDevice('notes', e.target.value)} />
               </div>
+              {!isShared && (
               <div>
                 <label style={propLabel}>Photo</label>
                 {selectedDevice.photoUrl ? (
@@ -785,6 +836,13 @@ export default function SurveyEditor() {
                 )}
                 <input ref={devicePhotoInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleDevicePhotoUpload} />
               </div>
+              )}
+              {isShared && selectedDevice.photoUrl && (
+                <div>
+                  <label style={propLabel}>Photo</label>
+                  <img src={selectedDevice.photoUrl} alt="Device" style={{ width: '100%', borderRadius: 6, border: '0.5px solid #e0dfd8', display: 'block' }} />
+                </div>
+              )}
               {selectedDevice.dtype === 'rak-gw' && (
                 <>
                   <div>
@@ -792,9 +850,11 @@ export default function SurveyEditor() {
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
                       <input type="range" min="25" max="400" step="5" style={{ flex: 1 }}
                         value={selectedDevice.hmRangeFt || 150}
+                        disabled={isShared}
                         onChange={e => updateSelectedDevice('hmRangeFt', parseInt(e.target.value))} />
                       <input type="number" min="1" step="1" style={{ ...propInput, width: 60, flexShrink: 0, textAlign: 'right' }}
                         value={selectedDevice.hmRangeFt || 150}
+                        disabled={isShared}
                         onChange={e => {
                           const v = parseInt(e.target.value)
                           updateSelectedDevice('hmRangeFt', Number.isFinite(v) ? Math.max(1, v) : 0)
@@ -808,6 +868,7 @@ export default function SurveyEditor() {
                   <div>
                     <label style={propLabel}>Signal strength</label>
                     <select style={propInput} value={selectedDevice.hmStrength || 1}
+                      disabled={isShared}
                       onChange={e => updateSelectedDevice('hmStrength', parseFloat(e.target.value))}>
                       <option value="1">Strong — open floor / warehouse</option>
                       <option value="0.75">Medium — office / drywall</option>
@@ -839,6 +900,7 @@ export default function SurveyEditor() {
               <div>
                 <label style={propLabel}>Type</label>
                 <select style={propInput} value={selectedCable.type || 'cat6'}
+                  disabled={isShared}
                   onChange={e => updateSelectedCable('type', e.target.value)}>
                   {Object.keys(CABLE_STYLES).map(t => (
                     <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
@@ -848,6 +910,7 @@ export default function SurveyEditor() {
               <div>
                 <label style={propLabel}>Label</label>
                 <input style={propInput} type="text" placeholder="e.g. Cam 1 → Switch"
+                  disabled={isShared}
                   value={selectedCable.label || ''} onChange={e => updateSelectedCable('label', e.target.value)} />
               </div>
               {!isShared && (
