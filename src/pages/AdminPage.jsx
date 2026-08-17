@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { getProfiles, getSurveys, getProjects, setUserAdmin, sendPasswordReset, signOut } from '../lib/supabase'
+import { getProfiles, getSurveys, getProjects, setUserAdmin, setUserAccessExpiration, sendPasswordReset, signOut } from '../lib/supabase'
 
 export default function AdminPage() {
   const { user } = useAuth()
@@ -47,6 +47,21 @@ export default function AdminPage() {
     setBusyId(null)
   }
 
+  function daysFromNow(days) {
+    const d = new Date()
+    d.setDate(d.getDate() + days)
+    return d.toISOString()
+  }
+
+  async function handleSetExpiration(u, days) {
+    setBusyId(u.id)
+    const expiresAt = days === null ? null : daysFromNow(days)
+    const { error } = await setUserAccessExpiration(u.id, expiresAt)
+    if (error) setError(error.message)
+    else setUsers(list => list.map(x => x.id === u.id ? { ...x, access_expires_at: expiresAt } : x))
+    setBusyId(null)
+  }
+
   async function handleResetPassword(u) {
     setResetStatus(s => ({ ...s, [u.id]: 'sending' }))
     const { error } = await sendPasswordReset(u.email)
@@ -78,7 +93,7 @@ export default function AdminPage() {
         </div>
       </nav>
 
-      <div style={{ maxWidth: 980, margin: '0 auto', padding: '32px 24px' }}>
+      <div style={{ maxWidth: 1060, margin: '0 auto', padding: '32px 24px' }}>
         <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a18', margin: '0 0 4px' }}>Registered users</h1>
         <p style={{ fontSize: 13, color: '#888', margin: '0 0 24px' }}>
           {users.length} account{users.length !== 1 ? 's' : ''} — staff and contractors who have signed up.
@@ -90,13 +105,14 @@ export default function AdminPage() {
           <div style={{ textAlign: 'center', padding: 48, color: '#888', fontSize: 13 }}>Loading…</div>
         ) : (
           <div style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr 100px 80px 80px 110px 140px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 130px 130px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
               <span>Name</span>
               <span>Email</span>
               <span>Joined</span>
               <span>Surveys</span>
               <span>Projects</span>
               <span>Role</span>
+              <span>Access</span>
               <span>Password</span>
             </div>
             {users.map(u => {
@@ -104,8 +120,10 @@ export default function AdminPage() {
               const isSending = status === 'sending'
               const isSent = status === 'sent'
               const isErr = status && status !== 'sending' && status !== 'sent'
+              const exp = u.access_expires_at ? new Date(u.access_expires_at) : null
+              const isExpired = exp && exp <= new Date()
               return (
-                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr 100px 80px 80px 110px 140px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 130px 130px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
                   <span style={{ color: '#1a1a18', fontWeight: 500 }}>
                     {u.full_name || '—'}{u.id === user.id && <span style={{ color: '#888', fontWeight: 400 }}> (you)</span>}
                   </span>
@@ -129,6 +147,23 @@ export default function AdminPage() {
                   >
                     {u.is_admin ? 'Admin' : 'Make admin'}
                   </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <span style={{ fontSize: 10.5, color: isExpired ? '#A32D2D' : exp ? '#B36B00' : '#888' }}>
+                      {exp ? `${isExpired ? 'Expired' : 'Expires'} ${exp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'No limit'}
+                    </span>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button onClick={() => handleSetExpiration(u, 30)} disabled={busyId === u.id} title="Set access to expire 30 days from today"
+                        style={tinyBtn}>
+                        {exp ? '↻ 30d' : 'Limit 30d'}
+                      </button>
+                      {exp && (
+                        <button onClick={() => handleSetExpiration(u, null)} disabled={busyId === u.id} title="Remove the expiration — permanent access"
+                          style={tinyBtn}>
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   <button
                     onClick={() => handleResetPassword(u)}
                     disabled={isSending}
@@ -154,3 +189,4 @@ export default function AdminPage() {
 }
 
 const ghostBtn = { padding: '6px 14px', background: '#fff', color: '#444', border: '0.5px solid #ccc', borderRadius: 7, fontSize: 12, cursor: 'pointer' }
+const tinyBtn = { padding: '2px 6px', fontSize: 10, border: '0.5px solid #ccc', borderRadius: 4, background: '#fff', color: '#666', cursor: 'pointer' }

@@ -26,8 +26,10 @@ export function AuthProvider({ children }) {
     getMyProfile(user.id).then(({ data }) => setProfile(data || null))
   }, [user])
 
+  const isExpired = !!(profile?.access_expires_at && new Date(profile.access_expires_at) <= new Date())
+
   return (
-    <AuthContext.Provider value={{ user, loading, profile, isAdmin: !!profile?.is_admin }}>
+    <AuthContext.Provider value={{ user, loading, profile, isAdmin: !!profile?.is_admin, isExpired }}>
       {children}
     </AuthContext.Provider>
   )

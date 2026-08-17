@@ -189,6 +189,10 @@ export async function setUserAdmin(id, isAdmin) {
   return supabase.from('profiles').update({ is_admin: isAdmin }).eq('id', id)
 }
 
+export async function setUserAccessExpiration(id, expiresAt) {
+  return supabase.from('profiles').update({ access_expires_at: expiresAt }).eq('id', id)
+}
+
 // ── Floor plan storage ──────────────────────────────────────────────────
 export async function uploadFloorPlan(surveyId, file) {
   const ext = file.name.split('.').pop()
