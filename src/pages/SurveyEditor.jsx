@@ -668,7 +668,7 @@ export default function SurveyEditor() {
             </div>
             <div>
               <div style={{ fontSize: 10, fontWeight: 500, color: '#888', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 5 }}>Heat map key</div>
-              <div style={{ height: 8, borderRadius: 4, background: 'linear-gradient(to right,rgba(0,180,100,0.3),rgba(255,200,0,0.8),rgba(255,50,0,1))', marginBottom: 3 }} />
+              <div style={{ height: 8, borderRadius: 4, background: 'linear-gradient(to right,rgba(255,50,0,1),rgba(255,200,0,0.8),rgba(0,180,100,0.3))', marginBottom: 3 }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#888' }}><span>Weak</span><span>Strong</span></div>
             </div>
           </div>

@@ -244,9 +244,9 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         const radius = r * frac
         const alpha = strength * (1 - frac + 0.1) * 0.4
         let fill
-        if (frac < 0.33) fill = `rgba(255,50,0,${alpha})`
+        if (frac < 0.33) fill = `rgba(0,180,80,${alpha})`
         else if (frac < 0.66) fill = `rgba(255,200,0,${alpha})`
-        else fill = `rgba(0,180,80,${alpha})`
+        else fill = `rgba(255,50,0,${alpha})`
         octx.beginPath(); octx.arc(cx, cy, radius, 0, Math.PI * 2)
         octx.fillStyle = fill; octx.fill()
       }
