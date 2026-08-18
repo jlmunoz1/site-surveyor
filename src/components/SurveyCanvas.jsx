@@ -218,7 +218,26 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floorPlanRotation])
 
-  // Heat map
+  // Blend between red (weak) -> yellow (mid) -> green (strong) based on
+  // a 0-1 normalized signal strength value.
+  function heatColor(strength) {
+    const s = Math.max(0, Math.min(1, strength))
+    const green = [0, 180, 80], yellow = [255, 200, 0], red = [255, 50, 0]
+    let c0, c1, t
+    if (s >= 0.5) { c0 = yellow; c1 = green; t = (s - 0.5) * 2 }
+    else { c0 = red; c1 = yellow; t = s * 2 }
+    return c0.map((v, i) => Math.round(v + (c1[i] - v) * t))
+  }
+
+  // Heat map — modeled on the indoor log-distance path loss model used
+  // in published LoRaWAN propagation research: signal strength falls
+  // off quickly near the source with a long weakening tail, rather
+  // than a straight linear fade, and the rate of that falloff depends
+  // on the environment's path-loss exponent (~1.8 for open floor
+  // plans, up to ~3.0+ for heavily obstructed spaces like concrete/
+  // CMU or hospitals). The user-specified range stays the anchor for
+  // where coverage ends — the environment setting controls how
+  // gracefully (or abruptly) signal degrades within that range.
   useEffect(() => {
     if (!hmCanvasRef.current || !wrapRef.current) return
     const canvas = hmCanvasRef.current
@@ -234,29 +253,64 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     const off = document.createElement('canvas')
     off.width = W; off.height = H
     const octx = off.getContext('2d')
+    const rings = [] // collected so we can draw crisp (unblurred) boundary rings after
+
     gws.forEach(gw => {
       const cx = (gw.x + 19) * zoom + pan.x
       const cy = (gw.y + 19) * zoom + pan.y
       const r = Math.round((gw.hmRangeFt || 150) * pxPerFt * zoom)
-      const strength = gw.hmStrength || 1
-      for (let i = 7; i >= 1; i--) {
-        const frac = i / 7
-        const radius = r * frac
-        const alpha = strength * (1 - frac + 0.1) * 0.4
-        let fill
-        if (frac < 0.33) fill = `rgba(0,180,80,${alpha})`
-        else if (frac < 0.66) fill = `rgba(255,200,0,${alpha})`
-        else fill = `rgba(255,50,0,${alpha})`
-        octx.beginPath(); octx.arc(cx, cy, radius, 0, Math.PI * 2)
-        octx.fillStyle = fill; octx.fill()
+      if (r <= 0) return
+      const strengthSetting = gw.hmStrength ?? 1
+      // Path-loss exponent from the chosen environment (see comment above).
+      const n = 1.8 + (1 - strengthSetting) * 2.4
+
+      const grad = octx.createRadialGradient(cx, cy, 0, cx, cy, r)
+      const STOPS = 14
+      for (let i = 0; i <= STOPS; i++) {
+        const frac = i / STOPS
+        // Inverse-power falloff, log-distance-path-loss-inspired: a
+        // higher exponent drains signal faster within the same
+        // specified range, matching how obstructed environments
+        // behave less gracefully than open ones even at equal range.
+        const strength = Math.pow(0.04 / (0.04 + frac), n)
+        const [rr, gg, bb] = heatColor(Math.min(1, strength))
+        const alpha = 0.55 * Math.min(1, strength * 1.4 + 0.05)
+        grad.addColorStop(frac, `rgba(${rr},${gg},${bb},${alpha})`)
       }
+      octx.beginPath(); octx.arc(cx, cy, r, 0, Math.PI * 2)
+      octx.fillStyle = grad; octx.fill()
+      rings.push({ cx, cy, r, rangeFt: gw.hmRangeFt || 150 })
     })
+
     const blur = document.createElement('canvas')
     blur.width = W; blur.height = H
     const bctx = blur.getContext('2d')
     bctx.filter = 'blur(28px)'
     bctx.drawImage(off, 0, 0)
     ctx.drawImage(blur, 0, 0)
+
+    // Coverage boundary — a crisp (unblurred) ring at the specified
+    // range for each gateway, so "area of coverage" is a clear,
+    // readable line rather than just a fade with no defined edge.
+    rings.forEach(({ cx, cy, r, rangeFt }) => {
+      ctx.save()
+      ctx.setLineDash([6, 5])
+      ctx.strokeStyle = 'rgba(40,40,40,0.55)'
+      ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
+      ctx.restore()
+      ctx.save()
+      ctx.font = '11px system-ui'
+      ctx.textAlign = 'center'
+      const label = `${rangeFt} ft`
+      const labelY = cy - r - 6
+      const metrics = ctx.measureText(label)
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'
+      ctx.fillRect(cx - metrics.width / 2 - 4, labelY - 11, metrics.width + 8, 14)
+      ctx.fillStyle = '#444'
+      ctx.fillText(label, cx, labelY)
+      ctx.restore()
+    })
   }, [devices, showHeatmap, pxPerFt, zoom, pan])
 
   // Restore SVG markup on mount only

@@ -876,8 +876,8 @@ export default function SurveyEditor() {
                     </select>
                   </div>
                   <div style={{ fontSize: 10, color: '#888', lineHeight: 1.5, background: '#f8f8f6', padding: '6px 8px', borderRadius: 6, border: '0.5px solid #e0dfd8' }}>
-                    <strong style={{ color: '#666' }}>Estimated indoor radius</strong><br/>
-                    Based on typical LoRaWAN indoor performance. Actual range varies with construction, antenna placement, and interference.<br/>
+                    <strong style={{ color: '#666' }}>Estimated coverage</strong><br/>
+                    Falloff follows a log-distance path-loss curve (published indoor LoRaWAN research), so signal fades quickly near the edge of range rather than in even steps. The dashed circle marks your specified range — actual coverage still varies with real construction, antenna placement, and interference.<br/>
                     Use "Set Scale" to calibrate ft to your floor plan.
                   </div>
                 </>
