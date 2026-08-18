@@ -34,6 +34,16 @@ export const DEVICE_DEFS = [
   }
 ]
 
+// A curated set of well-distinguished swatches for quick color picking,
+// shown alongside the native color picker + hex input rather than
+// replacing them — gives a fast path for common choices while keeping
+// full custom-color flexibility.
+export const COLOR_PALETTE = [
+  '#E24B4A', '#F5A623', '#F0D000', '#3B6D11', '#1D9E75', '#185FA5',
+  '#378ADD', '#534AB7', '#7F77DD', '#C21E7A', '#E85BAE', '#6B4423',
+  '#888780', '#1A2E4A',
+]
+
 export const DEVICE_STATUSES = {
   existing: { label: 'Existing', color: '#3B6D11' },
   proposed: { label: 'Proposed', color: '#378ADD' },

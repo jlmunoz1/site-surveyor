@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getSurvey, getSurveyByToken, saveSurvey, createSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices, updatePortMapperRackName } from '../lib/supabase'
 import SurveyCanvas from '../components/SurveyCanvas'
-import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES } from '../lib/devices'
+import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES, COLOR_PALETTE } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfPageCount } from '../lib/pdf'
 
@@ -715,7 +715,7 @@ export default function SurveyEditor() {
               </div>
               <div>
                 <label style={propLabel}>Color</label>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
                   <input type="color" value={selectedDevice.color || '#378ADD'}
                     disabled={isShared}
                     onChange={e => updateSelectedDevice('color', e.target.value)}
@@ -724,6 +724,18 @@ export default function SurveyEditor() {
                     disabled={isShared}
                     onChange={e => updateSelectedDevice('color', e.target.value)} placeholder="#378ADD" />
                 </div>
+                {!isShared && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 4 }}>
+                    {COLOR_PALETTE.map(c => (
+                      <button key={c} onClick={() => updateSelectedDevice('color', c)}
+                        title={c}
+                        style={{
+                          width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
+                          border: selectedDevice.color?.toLowerCase() === c.toLowerCase() ? '2px solid #1a1a18' : '1px solid rgba(0,0,0,0.15)',
+                        }} />
+                    ))}
+                  </div>
+                )}
                 {!isShared && getDefaultDeviceColor(selectedDevice.dtype) && selectedDevice.color !== getDefaultDeviceColor(selectedDevice.dtype) && (
                   <button onClick={() => updateSelectedDevice('color', getDefaultDeviceColor(selectedDevice.dtype))}
                     style={{ background: 'none', border: 'none', color: '#378ADD', cursor: 'pointer', fontSize: 11, padding: '4px 0 0' }}>
@@ -874,6 +886,39 @@ export default function SurveyEditor() {
                       <option value="0.75">Medium — office / drywall</option>
                       <option value="0.5">Weak — concrete / CMU / hospital</option>
                     </select>
+                  </div>
+                  <div>
+                    <label style={propLabel}>Coverage color</label>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                      <button onClick={() => updateSelectedDevice('hmFillColor', '')}
+                        disabled={isShared}
+                        style={{
+                          ...ghostBtnSmall, fontSize: 10.5,
+                          background: !selectedDevice.hmFillColor ? '#378ADD' : '#fff',
+                          color: !selectedDevice.hmFillColor ? '#fff' : '#666',
+                          border: !selectedDevice.hmFillColor ? 'none' : '0.5px solid #ccc',
+                        }}>
+                        Auto (green–red)
+                      </button>
+                      {selectedDevice.hmFillColor && (
+                        <input type="color" value={selectedDevice.hmFillColor}
+                          disabled={isShared}
+                          onChange={e => updateSelectedDevice('hmFillColor', e.target.value)}
+                          style={{ width: 30, height: 26, padding: 2, border: '0.5px solid #ccc', borderRadius: 6, cursor: isShared ? 'default' : 'pointer', background: '#fff' }} />
+                      )}
+                    </div>
+                    {!isShared && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        {COLOR_PALETTE.map(c => (
+                          <button key={c} onClick={() => updateSelectedDevice('hmFillColor', c)}
+                            title={c}
+                            style={{
+                              width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
+                              border: selectedDevice.hmFillColor?.toLowerCase() === c.toLowerCase() ? '2px solid #1a1a18' : '1px solid rgba(0,0,0,0.15)',
+                            }} />
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div style={{ fontSize: 10, color: '#888', lineHeight: 1.5, background: '#f8f8f6', padding: '6px 8px', borderRadius: 6, border: '0.5px solid #e0dfd8' }}>
                     <strong style={{ color: '#666' }}>Estimated coverage</strong><br/>

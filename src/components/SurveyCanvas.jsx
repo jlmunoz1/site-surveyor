@@ -229,6 +229,11 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     return c0.map((v, i) => Math.round(v + (c1[i] - v) * t))
   }
 
+  function hexToRgb(hex) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '')
+    return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [55, 138, 221]
+  }
+
   // Heat map — modeled on the indoor log-distance path loss model used
   // in published LoRaWAN propagation research: signal strength falls
   // off quickly near the source with a long weakening tail, rather
@@ -263,6 +268,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       const strengthSetting = gw.hmStrength ?? 1
       // Path-loss exponent from the chosen environment (see comment above).
       const n = 1.8 + (1 - strengthSetting) * 2.4
+      const fillRgb = gw.hmFillColor ? hexToRgb(gw.hmFillColor) : null
 
       const grad = octx.createRadialGradient(cx, cy, 0, cx, cy, r)
       const STOPS = 14
@@ -273,7 +279,10 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         // specified range, matching how obstructed environments
         // behave less gracefully than open ones even at equal range.
         const strength = Math.pow(0.04 / (0.04 + frac), n)
-        const [rr, gg, bb] = heatColor(Math.min(1, strength))
+        // A custom fill color, if set, replaces the auto green/yellow/
+        // red interpolation — only opacity still varies with distance,
+        // giving a single-color "area of coverage" fill instead.
+        const [rr, gg, bb] = fillRgb || heatColor(Math.min(1, strength))
         const alpha = 0.55 * Math.min(1, strength * 1.4 + 0.05)
         grad.addColorStop(frac, `rgba(${rr},${gg},${bb},${alpha})`)
       }
