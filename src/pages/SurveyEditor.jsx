@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getSurvey, getSurveyByToken, saveSurvey, createSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices, updatePortMapperRackName } from '../lib/supabase'
+import { getSurvey, getSurveyByToken, getSurveys, saveSurvey, createSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices, updatePortMapperRackName } from '../lib/supabase'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES, COLOR_PALETTE } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
@@ -60,6 +60,12 @@ export default function SurveyEditor() {
   const [nameInput, setNameInput] = useState('')
   const [calibrating, setCalibrating] = useState(false)
   const [measuring, setMeasuring] = useState(false)
+  const [showCopyScale, setShowCopyScale] = useState(false)
+  const [siblingSurveys, setSiblingSurveys] = useState([])
+  const [loadingSiblings, setLoadingSiblings] = useState(false)
+  const [selectedSiblings, setSelectedSiblings] = useState({})
+  const [copyingScale, setCopyingScale] = useState(false)
+  const [copyScaleMsg, setCopyScaleMsg] = useState('')
   const [showCalibrateModal, setShowCalibrateModal] = useState(false)
   const [calibrateDistance, setCalibrateDistance] = useState('')
   const [calibratePixels, setCalibratePixels] = useState(0)
@@ -334,6 +340,36 @@ export default function SurveyEditor() {
     setMode('select')
   }
 
+  async function openCopyScale() {
+    setShowCopyScale(true)
+    setCopyScaleMsg(''); setSelectedSiblings({})
+    if (!survey?.project_id) { setSiblingSurveys([]); return }
+    setLoadingSiblings(true)
+    const { data } = await getSurveys()
+    setSiblingSurveys((data || []).filter(s => s.project_id === survey.project_id && s.id !== id))
+    setLoadingSiblings(false)
+  }
+
+  function toggleSibling(sid) {
+    setSelectedSiblings(s => ({ ...s, [sid]: !s[sid] }))
+  }
+
+  async function handleCopyScale() {
+    const targets = siblingSurveys.filter(s => selectedSiblings[s.id])
+    if (targets.length === 0) return
+    setCopyingScale(true)
+    let succeeded = 0
+    for (const s of targets) {
+      const { error } = await saveSurvey(s.id, { px_per_ft: pxPerFt })
+      if (!error) succeeded++
+    }
+    setCopyingScale(false)
+    setCopyScaleMsg(succeeded === targets.length
+      ? `Copied ${pxPerFt} px/ft to ${succeeded} floor${succeeded !== 1 ? 's' : ''}.`
+      : `Copied to ${succeeded} of ${targets.length} — check for errors.`)
+    setSelectedSiblings({})
+  }
+
   function handleCalibrateDrag(x1, y1, x2, y2) {
     const dx = x2 - x1
     const dy = y2 - y1
@@ -351,7 +387,6 @@ export default function SurveyEditor() {
     updateScale(newScale)
     setScaleInput(String(newScale))
     setShowCalibrateModal(false)
-    setCalibratePoints([])
     setCalibrateDistance('')
     setSaveMsg('Scale set: ' + newScale + ' px/ft'); setTimeout(() => setSaveMsg(''), 3000)
   }
@@ -570,6 +605,11 @@ export default function SurveyEditor() {
         {!isShared && (
           <button style={tbBtn} onClick={() => setShowScale(true)} title="Manually enter px/ft">
             <i className="ti ti-adjustments" /> {pxPerFt} px/ft
+          </button>
+        )}
+        {!isShared && survey?.project_id && (
+          <button style={tbBtn} onClick={openCopyScale} title="Apply this floor's scale to other floors in the project">
+            <i className="ti ti-copy" /> Copy Scale
           </button>
         )}
         {!isShared && <button style={tbBtn} onClick={() => setShowBOM(true)}><i className="ti ti-clipboard-list" /> BOM</button>}
@@ -977,7 +1017,7 @@ export default function SurveyEditor() {
       </div>
 
       {showCalibrateModal && (
-        <Modal onClose={() => { setShowCalibrateModal(false); setCalibratePoints([]) }}>
+        <Modal onClose={() => { setShowCalibrateModal(false) }}>
           <h3 style={modalTitle}>Set scale from measurement</h3>
           <p style={{ fontSize: 12, color: '#666', marginBottom: 14, lineHeight: 1.5 }}>
             You drew a line <strong>{calibratePixels} pixels</strong> long on screen.<br/>
@@ -1001,7 +1041,40 @@ export default function SurveyEditor() {
               onClick={applyCalibration} disabled={!calibrateDistance || parseFloat(calibrateDistance) <= 0}>
               Apply scale
             </button>
-            <button style={ghostBtn} onClick={() => { setShowCalibrateModal(false); setCalibratePoints([]) }}>Cancel</button>
+            <button style={ghostBtn} onClick={() => { setShowCalibrateModal(false) }}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {showCopyScale && (
+        <Modal onClose={() => setShowCopyScale(false)}>
+          <h3 style={modalTitle}>Copy scale to other floors</h3>
+          <p style={{ fontSize: 12, color: '#666', marginBottom: 14, lineHeight: 1.5 }}>
+            Apply this floor's scale — <strong>{pxPerFt} px/ft</strong> — to other surveys in the same project. Useful when a multi-page floor plan uses the same drawing scale on every floor.
+          </p>
+          {loadingSiblings ? (
+            <p style={{ fontSize: 12, color: '#888' }}>Loading…</p>
+          ) : siblingSurveys.length === 0 ? (
+            <p style={{ fontSize: 12, color: '#aaa' }}>No other surveys in this project yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto', marginBottom: 14 }}>
+              {siblingSurveys.map(s => (
+                <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, background: '#f8f8f6', border: '0.5px solid #e0dfd8', borderRadius: 7, padding: '7px 10px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!selectedSiblings[s.id]} onChange={() => toggleSibling(s.id)} />
+                  <span style={{ flex: 1, color: '#1a1a18' }}>{s.name}</span>
+                  <span style={{ fontSize: 11, color: '#aaa' }}>{s.px_per_ft || 4} px/ft</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {copyScaleMsg && <p style={{ fontSize: 12, color: '#0F6E56', marginBottom: 12 }}>{copyScaleMsg}</p>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={{ ...primaryBtn, background: '#EAF3DE', color: '#3B6D11', border: '0.5px solid #97C459' }}
+              onClick={handleCopyScale}
+              disabled={copyingScale || Object.values(selectedSiblings).every(v => !v)}>
+              {copyingScale ? 'Copying…' : 'Apply to selected'}
+            </button>
+            <button style={ghostBtn} onClick={() => setShowCopyScale(false)}>Close</button>
           </div>
         </Modal>
       )}
