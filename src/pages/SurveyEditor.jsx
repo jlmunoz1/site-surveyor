@@ -134,6 +134,9 @@ export default function SurveyEditor() {
   }, [id, isShared])
 
   function updateDevices(newDevs) { setDevices(newDevs); scheduleSave(newDevs, cables, svgMarkup, pxPerFt) }
+  function applyGlobalAOCColor(color) {
+    updateDevices(devices.map(d => d.dtype === 'rak-gw' ? { ...d, hmFillColor: color } : d))
+  }
   function updateCables(newCabs) { setCables(newCabs); scheduleSave(devices, newCabs, svgMarkup, pxPerFt) }
   function updateMarkup(m) { setSvgMarkup(m); scheduleSave(devices, cables, m, pxPerFt) }
   function updateScale(s) { setPxPerFt(s); scheduleSave(devices, cables, svgMarkup, s) }
@@ -216,6 +219,9 @@ export default function SurveyEditor() {
   function handleCableSelect(cableId) { setSelectedCableId(cableId); setSelectedId(null) }
 
   const selectedDevice = devices.find(d => d.id === selectedId)
+  const gatewayFillColors = [...new Set(devices.filter(d => d.dtype === 'rak-gw').map(d => d.hmFillColor || ''))]
+  const allGatewaysAuto = gatewayFillColors.length <= 1 && (gatewayFillColors.length === 0 || gatewayFillColors[0] === '')
+  const allGatewaysColor = gatewayFillColors.length === 1 && gatewayFillColors[0] ? gatewayFillColors[0] : null
   const [rackEquipment, setRackEquipment] = useState([])
   const [loadingRackEquipment, setLoadingRackEquipment] = useState(false)
   const [rackEquipmentError, setRackEquipmentError] = useState('')
@@ -598,6 +604,28 @@ export default function SurveyEditor() {
               onChange={e => setHeatmapOpacity(parseFloat(e.target.value))}
               style={{ width: 60 }} title="Heat map opacity" />
             <span style={{ fontSize: 10, color: '#888', minWidth: 26 }}>{Math.round(heatmapOpacity * 100)}%</span>
+          </div>
+        )}
+        {showHeatmap && !isShared && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, color: '#888' }}>AOC Color</span>
+            <button onClick={() => applyGlobalAOCColor('')}
+              title="Auto — green (strong) to red (weak)"
+              style={{
+                padding: '3px 8px', fontSize: 10, fontWeight: 500, borderRadius: 6, cursor: 'pointer',
+                background: allGatewaysAuto ? '#378ADD' : '#fff',
+                color: allGatewaysAuto ? '#fff' : '#666',
+                border: allGatewaysAuto ? 'none' : '0.5px solid #ccc',
+              }}>
+              Auto
+            </button>
+            {COLOR_PALETTE.map(c => (
+              <button key={c} onClick={() => applyGlobalAOCColor(c)} title={c}
+                style={{
+                  width: 18, height: 18, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
+                  border: allGatewaysColor?.toLowerCase() === c.toLowerCase() ? '2px solid #1a1a18' : '1px solid rgba(0,0,0,0.15)',
+                }} />
+            ))}
           </div>
         )}
         {!isShared && (
