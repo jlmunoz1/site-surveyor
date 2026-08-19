@@ -137,6 +137,9 @@ export default function SurveyEditor() {
   function applyGlobalAOCColor(color) {
     updateDevices(devices.map(d => d.dtype === 'rak-gw' ? { ...d, hmFillColor: color } : d))
   }
+  function applyGlobalAOCRange(rangeFt) {
+    updateDevices(devices.map(d => d.dtype === 'rak-gw' ? { ...d, hmRangeFt: rangeFt } : d))
+  }
   function updateCables(newCabs) { setCables(newCabs); scheduleSave(devices, newCabs, svgMarkup, pxPerFt) }
   function updateMarkup(m) { setSvgMarkup(m); scheduleSave(devices, cables, m, pxPerFt) }
   function updateScale(s) { setPxPerFt(s); scheduleSave(devices, cables, svgMarkup, s) }
@@ -222,6 +225,8 @@ export default function SurveyEditor() {
   const gatewayFillColors = [...new Set(devices.filter(d => d.dtype === 'rak-gw').map(d => d.hmFillColor || ''))]
   const allGatewaysAuto = gatewayFillColors.length <= 1 && (gatewayFillColors.length === 0 || gatewayFillColors[0] === '')
   const allGatewaysColor = gatewayFillColors.length === 1 && gatewayFillColors[0] ? gatewayFillColors[0] : null
+  const gatewayRanges = [...new Set(devices.filter(d => d.dtype === 'rak-gw').map(d => d.hmRangeFt || 150))]
+  const allGatewaysRange = gatewayRanges.length === 1 ? gatewayRanges[0] : null
   const [rackEquipment, setRackEquipment] = useState([])
   const [loadingRackEquipment, setLoadingRackEquipment] = useState(false)
   const [rackEquipmentError, setRackEquipmentError] = useState('')
@@ -626,6 +631,23 @@ export default function SurveyEditor() {
                   border: allGatewaysColor?.toLowerCase() === c.toLowerCase() ? '2px solid #1a1a18' : '1px solid rgba(0,0,0,0.15)',
                 }} />
             ))}
+          </div>
+        )}
+        {showHeatmap && !isShared && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 10, color: '#888' }}>AOC Range</span>
+            <input type="number" min="1" step="5"
+              key={allGatewaysRange ?? 'mixed'}
+              defaultValue={allGatewaysRange ?? ''}
+              placeholder={allGatewaysRange === null ? 'Mixed' : ''}
+              onBlur={e => {
+                const v = parseInt(e.target.value)
+                if (v > 0) applyGlobalAOCRange(v)
+              }}
+              onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+              style={{ width: 55, fontSize: 11, padding: '3px 5px', border: '0.5px solid #ccc', borderRadius: 5 }}
+              title="Set LoRa range (ft) for every gateway at once" />
+            <span style={{ fontSize: 10, color: '#888' }}>ft (all)</span>
           </div>
         )}
         {!isShared && (
