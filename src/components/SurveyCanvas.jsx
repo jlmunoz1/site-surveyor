@@ -254,25 +254,28 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px'
     ctx.clearRect(0, 0, W, H)
     const gws = devices.filter(d => d.dtype === 'rak-gw')
-    console.log('[heatmap] showHeatmap:', showHeatmap, '| canvas size:', W, H, '| gateways found:', gws.length, '| pxPerFt:', pxPerFt, '| zoom:', zoom, '| pan:', pan)
     if (!gws.length) return
-    const off = document.createElement('canvas')
-    off.width = W; off.height = H
-    const octx = off.getContext('2d')
     const rings = [] // collected so we can draw crisp (unblurred) boundary rings after
 
+    // Draw the blurred fill directly on the real, on-page canvas rather
+    // than routing through offscreen canvases — blur/filter support on
+    // *detached* canvases (created but never attached to the page) has
+    // a real history of being unreliable across browsers and can
+    // silently produce a blank result even though the draw calls
+    // themselves complete without error.
+    ctx.save()
+    ctx.filter = 'blur(28px)'
     gws.forEach(gw => {
       const cx = (gw.x + 19) * zoom + pan.x
       const cy = (gw.y + 19) * zoom + pan.y
       const r = Math.round((gw.hmRangeFt || 150) * pxPerFt * zoom)
-      console.log('[heatmap] gateway', gw.label, '| cx,cy:', cx, cy, '| radius px:', r, '| hmRangeFt:', gw.hmRangeFt, '| hmFillColor:', gw.hmFillColor, '| in-bounds:', cx > -r && cx < W + r && cy > -r && cy < H + r)
-      if (r <= 0) { console.log('[heatmap] SKIPPED — radius <= 0'); return }
+      if (r <= 0) return
       const strengthSetting = gw.hmStrength ?? 1
       // Path-loss exponent from the chosen environment (see comment above).
       const n = 1.8 + (1 - strengthSetting) * 2.4
       const fillRgb = gw.hmFillColor ? hexToRgb(gw.hmFillColor) : null
 
-      const grad = octx.createRadialGradient(cx, cy, 0, cx, cy, r)
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
       const STOPS = 14
       for (let i = 0; i <= STOPS; i++) {
         const frac = i / STOPS
@@ -286,22 +289,13 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         // giving a single-color "area of coverage" fill instead.
         const [rr, gg, bb] = fillRgb || heatColor(Math.min(1, strength))
         const alpha = 0.55 * Math.min(1, strength * 1.4 + 0.05)
-        if (i === 0) console.log('[heatmap] center color:', rr, gg, bb, 'alpha:', alpha)
         grad.addColorStop(frac, `rgba(${rr},${gg},${bb},${alpha})`)
       }
-      octx.beginPath(); octx.arc(cx, cy, r, 0, Math.PI * 2)
-      octx.fillStyle = grad; octx.fill()
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2)
+      ctx.fillStyle = grad; ctx.fill()
       rings.push({ cx, cy, r, rangeFt: gw.hmRangeFt || 150 })
     })
-
-    const blur = document.createElement('canvas')
-    blur.width = W; blur.height = H
-    const bctx = blur.getContext('2d')
-    bctx.filter = 'blur(28px)'
-    console.log('[heatmap] blur filter applied:', bctx.filter)
-    bctx.drawImage(off, 0, 0)
-    ctx.drawImage(blur, 0, 0)
-    console.log('[heatmap] draw complete')
+    ctx.restore() // clears the blur filter for what follows
 
     // Coverage boundary — a crisp (unblurred) ring at the specified
     // range for each gateway, so "area of coverage" is a clear,
