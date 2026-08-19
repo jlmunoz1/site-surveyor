@@ -13,6 +13,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   floorPlanRotation = 0,
   iconSizes = { cameras: 16, lora: 20, network: 20, access: 16 },
   labelSizes = { cameras: 10, lora: 13, network: 10, access: 10 },
+  heatmapOpacity = 0.8,
   calibrating = false,
   measuring = false,
   onCalibrateDrag,
@@ -264,7 +265,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     // silently produce a blank result even though the draw calls
     // themselves complete without error.
     ctx.save()
-    ctx.filter = 'blur(16px)'
+    ctx.filter = 'blur(10px)'
     gws.forEach(gw => {
       const cx = (gw.x + 19) * zoom + pan.x
       const cy = (gw.y + 19) * zoom + pan.y
@@ -288,7 +289,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         // red interpolation — only opacity still varies with distance,
         // giving a single-color "area of coverage" fill instead.
         const [rr, gg, bb] = fillRgb || heatColor(Math.min(1, strength))
-        const alpha = 0.8 * Math.min(1, strength * 1.4 + 0.1)
+        const alpha = heatmapOpacity * Math.min(1, strength * 1.6 + 0.25)
         grad.addColorStop(frac, `rgba(${rr},${gg},${bb},${alpha})`)
       }
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2)
@@ -300,26 +301,15 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     // Coverage boundary — a crisp (unblurred) ring at the specified
     // range for each gateway, so "area of coverage" is a clear,
     // readable line rather than just a fade with no defined edge.
-    rings.forEach(({ cx, cy, r, rangeFt }) => {
+    rings.forEach(({ cx, cy, r }) => {
       ctx.save()
       ctx.setLineDash([6, 5])
       ctx.strokeStyle = 'rgba(40,40,40,0.55)'
       ctx.lineWidth = 1.5
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
       ctx.restore()
-      ctx.save()
-      ctx.font = '11px system-ui'
-      ctx.textAlign = 'center'
-      const label = `${rangeFt} ft`
-      const labelY = cy - r - 6
-      const metrics = ctx.measureText(label)
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'
-      ctx.fillRect(cx - metrics.width / 2 - 4, labelY - 11, metrics.width + 8, 14)
-      ctx.fillStyle = '#444'
-      ctx.fillText(label, cx, labelY)
-      ctx.restore()
     })
-  }, [devices, showHeatmap, pxPerFt, zoom, pan])
+  }, [devices, showHeatmap, pxPerFt, zoom, pan, heatmapOpacity])
 
   // Restore SVG markup on mount only
   useEffect(() => {

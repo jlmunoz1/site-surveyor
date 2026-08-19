@@ -73,6 +73,7 @@ export default function SurveyEditor() {
   const [mode, setMode] = useState('select')
   const [activeCableType, setActiveCableType] = useState('cat6')
   const [showHeatmap, setShowHeatmap] = useState(true)
+  const [heatmapOpacity, setHeatmapOpacity] = useState(0.8)
   const [selectedId, setSelectedId] = useState(null)
   const [showNetworkMapper, setShowNetworkMapper] = useState(false)
   const [selectedCableId, setSelectedCableId] = useState(null)
@@ -590,6 +591,15 @@ export default function SurveyEditor() {
           onClick={() => setShowHeatmap(h => !h)}>
           <i className="ti ti-wave-sine" /> Heat Map
         </button>
+        {showHeatmap && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 10, color: '#888' }}>Opacity</span>
+            <input type="range" min="0.1" max="1" step="0.05" value={heatmapOpacity}
+              onChange={e => setHeatmapOpacity(parseFloat(e.target.value))}
+              style={{ width: 60 }} title="Heat map opacity" />
+            <span style={{ fontSize: 10, color: '#888', minWidth: 26 }}>{Math.round(heatmapOpacity * 100)}%</span>
+          </div>
+        )}
         {!isShared && (
           <button style={{ ...tbBtn, ...(calibrating ? { color: '#E24B4A', borderColor: '#E24B4A', background: '#FCEBEB' } : {}) }}
             onClick={() => calibrating ? setCalibrating(false) : startCalibrate()}
@@ -717,7 +727,7 @@ export default function SurveyEditor() {
         <SurveyCanvas
           ref={canvasRef}
           devices={devices} cables={cables} svgMarkup={svgMarkup}
-          pxPerFt={pxPerFt} showHeatmap={showHeatmap}
+          pxPerFt={pxPerFt} showHeatmap={showHeatmap} heatmapOpacity={heatmapOpacity}
           mode={mode} activeCableType={activeCableType}
           onDeviceAdd={handleDeviceAdd} onDeviceMove={handleDeviceMove} onDeviceSelect={handleDeviceSelect}
           onCableAdd={handleCableAdd} onCableSelect={handleCableSelect}
