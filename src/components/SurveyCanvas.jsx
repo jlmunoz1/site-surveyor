@@ -264,7 +264,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     // silently produce a blank result even though the draw calls
     // themselves complete without error.
     ctx.save()
-    ctx.filter = 'blur(28px)'
+    ctx.filter = 'blur(16px)'
     gws.forEach(gw => {
       const cx = (gw.x + 19) * zoom + pan.x
       const cy = (gw.y + 19) * zoom + pan.y
@@ -288,7 +288,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         // red interpolation — only opacity still varies with distance,
         // giving a single-color "area of coverage" fill instead.
         const [rr, gg, bb] = fillRgb || heatColor(Math.min(1, strength))
-        const alpha = 0.55 * Math.min(1, strength * 1.4 + 0.05)
+        const alpha = 0.8 * Math.min(1, strength * 1.4 + 0.1)
         grad.addColorStop(frac, `rgba(${rr},${gg},${bb},${alpha})`)
       }
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2)
@@ -799,7 +799,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         )}
 
         {/* Heat map outside zoom layer - always fills viewport */}
-        <canvas ref={hmCanvasRef} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', opacity: 0.85 }} />
+        <canvas ref={hmCanvasRef} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', opacity: 1 }} />
       </div>
     </div>
   )
