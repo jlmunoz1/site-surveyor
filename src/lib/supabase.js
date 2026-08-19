@@ -115,6 +115,25 @@ export async function removeProjectMember(id) {
   return { error }
 }
 
+// Sends an actual invite email (via Supabase's built-in admin invite
+// system) telling someone they've been given access — the
+// project_members row alone only grants access silently, it never
+// notifies anyone on its own.
+export async function sendProjectInviteEmail(email, projectName) {
+  try {
+    const res = await fetch('/api/invite-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, projectName }),
+    })
+    const data = await res.json()
+    if (!res.ok) return { error: data.error || 'Failed to send invite email' }
+    return { sent: data.sent, reason: data.reason, error: null }
+  } catch (err) {
+    return { error: err.message || 'Failed to reach invite email service' }
+  }
+}
+
 export async function setProjectPortMapperSiteId(projectId, siteId) {
   return supabase.from('projects').update({ port_mapper_site_id: siteId }).eq('id', projectId)
 }

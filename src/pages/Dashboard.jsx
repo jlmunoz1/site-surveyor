@@ -8,7 +8,7 @@ import {
   getProjects, createProject, deleteProject, getProfiles,
   syncProjectToPortMapper, setProjectPortMapperSiteId,
   uploadFloorPlan, saveSurvey,
-  getProjectMembers, inviteToProject, removeProjectMember,
+  getProjectMembers, inviteToProject, removeProjectMember, sendProjectInviteEmail,
 } from '../lib/supabase'
 
 export default function Dashboard() {
@@ -44,6 +44,7 @@ export default function Dashboard() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviting, setInviting] = useState(false)
   const [inviteError, setInviteError] = useState('')
+  const [inviteInfo, setInviteInfo] = useState('')
   const floorPlanInputRef = useRef(null)
   const pendingProjectRef = useRef(null)
 
@@ -145,7 +146,7 @@ export default function Dashboard() {
 
   async function openShareModal(project) {
     setShareProject(project)
-    setInviteEmail(''); setInviteError('')
+    setInviteEmail(''); setInviteError(''); setInviteInfo('')
     setLoadingMembers(true)
     const { data } = await getProjectMembers(project.id)
     setMembers(data || [])
@@ -155,15 +156,23 @@ export default function Dashboard() {
   async function handleInvite(e) {
     e.preventDefault()
     if (!inviteEmail.trim()) return
-    setInviting(true); setInviteError('')
+    setInviting(true); setInviteError(''); setInviteInfo('')
     const { data, error } = await inviteToProject(shareProject.id, inviteEmail, user.id)
-    setInviting(false)
     if (error) {
+      setInviting(false)
       setInviteError(error.message.includes('duplicate') ? 'Already invited.' : error.message)
       return
     }
     setMembers(m => [...m, data])
+    const emailToSend = inviteEmail.trim()
     setInviteEmail('')
+    // Best-effort: send an actual invite email so they know they've
+    // been given access, rather than granting it silently.
+    const { sent, reason, error: emailError } = await sendProjectInviteEmail(emailToSend, shareProject.name)
+    setInviting(false)
+    if (emailError) setInviteError(`Access granted, but the invite email failed to send: ${emailError}`)
+    else if (sent) setInviteInfo(`Invite email sent to ${emailToSend}.`)
+    else if (reason === 'already_has_account') setInviteInfo(`${emailToSend} already has an account — access granted, no email needed.`)
   }
 
   async function handleRemoveMember(id) {
@@ -397,7 +406,7 @@ export default function Dashboard() {
               </button>
             </div>
             <p style={{ fontSize: 12, color: '#888', margin: '0 0 16px' }}>
-              Invited contractors will only see this project — not your whole team's projects. Staff accounts (no access limit set) already see everything, so inviting them here isn't necessary.
+              Invited contractors will only see this project — not your whole team's projects. Staff accounts (no access limit set) already see everything, so inviting them here isn't necessary. We'll email them a signup/login link automatically.
             </p>
 
             <form onSubmit={handleInvite} style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
@@ -407,6 +416,7 @@ export default function Dashboard() {
               <button type="submit" disabled={inviting} style={primaryBtn}>{inviting ? 'Inviting…' : 'Invite'}</button>
             </form>
             {inviteError && <p style={{ fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '7px 10px', borderRadius: 6, marginBottom: 12 }}>{inviteError}</p>}
+            {inviteInfo && <p style={{ fontSize: 12, color: '#0F6E56', background: '#E1F5EE', padding: '7px 10px', borderRadius: 6, marginBottom: 12 }}>{inviteInfo}</p>}
 
             <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 }}>
               Invited ({members.length})
