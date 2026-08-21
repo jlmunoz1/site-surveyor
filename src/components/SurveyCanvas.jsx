@@ -29,6 +29,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   const [drawEl, setDrawEl] = useState(null)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
+  const baseZoomRef = useRef(null) // the current "fit to window" zoom — null until first computed
   const isPanning = useRef(false)
   const panStart = useRef({ x: 0, y: 0 })
   const panOrigin = useRef({ x: 0, y: 0 })
@@ -90,20 +91,28 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
 
     if (source.kind === 'image') {
       const image = source.img
-      const wr = wrapRef.current.getBoundingClientRect()
       const srcW = image.naturalWidth, srcH = image.naturalHeight
       const displayW = isRotated90 ? srcH : srcW
       const displayH = isRotated90 ? srcW : srcH
-      const scale = Math.min(wr.width / displayW, wr.height / displayH, 1) * 2
-      canvas.width = Math.round(displayW * scale)
-      canvas.height = Math.round(displayH * scale)
-      canvas.style.width = Math.round(canvas.width / 2) + 'px'
-      canvas.style.height = Math.round(canvas.height / 2) + 'px'
+      // Fixed pixel density for sharpness — deliberately NOT based on
+      // the current window size. Baking the "fit to window" ratio into
+      // the canvas's own CSS pixel dimensions meant device coordinates
+      // (stored relative to this size) landed in a different relative
+      // spot on the floor plan any time the window size differed
+      // between sessions — devices appeared to "move" on reopening.
+      // Now the floor plan always renders at a fixed, deterministic
+      // size (its own natural pixels), and "fit to window" is handled
+      // purely as a zoom level instead (see getBaseZoom below).
+      const PIXEL_DENSITY = 2
+      canvas.width = Math.round(displayW * PIXEL_DENSITY)
+      canvas.height = Math.round(displayH * PIXEL_DENSITY)
+      canvas.style.width = displayW + 'px'
+      canvas.style.height = displayH + 'px'
       const rad = (rotNorm * Math.PI) / 180
       ctx.save()
       ctx.translate(canvas.width / 2, canvas.height / 2)
       ctx.rotate(rad)
-      ctx.drawImage(image, -srcW * scale / 2, -srcH * scale / 2, srcW * scale, srcH * scale)
+      ctx.drawImage(image, -srcW * PIXEL_DENSITY / 2, -srcH * PIXEL_DENSITY / 2, srcW * PIXEL_DENSITY, srcH * PIXEL_DENSITY)
       ctx.restore()
     } else if (source.kind === 'pdf') {
       const raw = source.canvas
@@ -121,18 +130,27 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       ctx.restore()
     }
 
-    // Center the floor plan (and everything placed on it) within the
-    // wrapper when at the locked 1x baseline. Without this, a floor
-    // plan whose aspect ratio doesn't match the window just sits
-    // pinned to the top-left with empty space on one side instead of
-    // being centered in the viewport.
-    if (zoomRef.current === 1 && wrapRef.current) {
-      const wr = wrapRef.current.getBoundingClientRect()
-      const cw = parseFloat(canvas.style.width) || 0
-      const ch = parseFloat(canvas.style.height) || 0
-      const centered = { x: Math.max(0, (wr.width - cw) / 2), y: Math.max(0, (wr.height - ch) / 2) }
-      panRef.current = centered
-      setPan(centered)
+    // Snap to the fitted "base" zoom (and center) whenever the person
+    // is currently at that locked baseline — i.e. hasn't manually
+    // zoomed in. Runs on first load (fitting the floor plan to the
+    // window) and again after rotation (swapping width/height changes
+    // what "fit" means), but leaves an intentionally zoomed-in view
+    // alone. The floor plan itself now always renders at a fixed,
+    // deterministic size (see the sizing above) — "fit to window" is
+    // handled entirely here, as a zoom level, rather than baked into
+    // the canvas's own pixel dimensions like before.
+    if (wrapRef.current) {
+      const isFirstDraw = baseZoomRef.current === null
+      const wasAtBase = !isFirstDraw && Math.abs(zoomRef.current - baseZoomRef.current) < 0.001
+      const newBase = getBaseZoom()
+      if (isFirstDraw || wasAtBase) {
+        const centered = getCenterOffset(newBase)
+        zoomRef.current = newBase
+        panRef.current = centered
+        setZoom(newBase)
+        setPan(centered)
+      }
+      baseZoomRef.current = newBase
     }
   }, [])
 
@@ -182,8 +200,13 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
           const raw = document.createElement('canvas')
           raw.width = Math.round(vp.width)
           raw.height = Math.round(vp.height)
-          const wr = wrapRef.current.getBoundingClientRect()
-          const displayScale = Math.min(wr.width / raw.width, wr.height / raw.height)
+          // Fixed, deterministic CSS display scale — converts the
+          // high-resolution render buffer back down to roughly "1 PDF
+          // point = 1 CSS pixel". Deliberately NOT based on the current
+          // window size; see the comment in drawFloorPlanAtRotation for
+          // why baking window size into this caused devices to appear
+          // to move between sessions.
+          const displayScale = 1 / RENDER_SCALE
           await page.render({ canvasContext: raw.getContext('2d'), viewport: vp }).promise
 
           loadedSourceRef.current = { kind: 'pdf', canvas: raw, displayScale }
@@ -359,10 +382,11 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         const delta = Math.max(-25, Math.min(25, e.deltaY))
         const factor = Math.exp(-delta * 0.0015)
         // Floor plan is locked to its fitted size — never zoom below
-        // 1x (the "locked" baseline), only in from there.
-        const newZoom = Math.min(Math.max(zoomRef.current * factor, 1), 8)
-        const newPan = newZoom === 1
-          ? getCenterOffset()
+        // that base ("fit to window") level, only in from there.
+        const base = baseZoomRef.current || 1
+        const newZoom = Math.min(Math.max(zoomRef.current * factor, base), 8)
+        const newPan = newZoom === base
+          ? getCenterOffset(newZoom)
           : {
               x: mouseX - (mouseX - panRef.current.x) * (newZoom / zoomRef.current),
               y: mouseY - (mouseY - panRef.current.y) * (newZoom / zoomRef.current),
@@ -372,10 +396,10 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         setZoom(newZoom)
         setPan(newPan)
       } else {
-        // While at the locked 1x baseline, the floor plan shouldn't
-        // drift on plain scroll — panning only kicks in once the
-        // user has actually zoomed in past the locked size.
-        if (zoomRef.current <= 1) return
+        // While at the locked "fit to window" baseline, the floor plan
+        // shouldn't drift on plain scroll — panning only kicks in once
+        // the user has actually zoomed in past the locked size.
+        if (zoomRef.current <= (baseZoomRef.current || 1) + 0.001) return
         const newPan = {
           x: panRef.current.x - e.deltaX,
           y: panRef.current.y - e.deltaY,
@@ -479,9 +503,9 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       return
     }
     if (isPanning.current) {
-      // Locked at the fitted 1x baseline — dragging shouldn't move
-      // the floor plan until the user has zoomed in.
-      if (zoomRef.current <= 1) return
+      // Locked at the fitted "fit to window" baseline — dragging
+      // shouldn't move the floor plan until the user has zoomed in.
+      if (zoomRef.current <= (baseZoomRef.current || 1) + 0.001) return
       const newPan = {
         x: panOrigin.current.x + (e.clientX - panStart.current.x),
         y: panOrigin.current.y + (e.clientY - panStart.current.y),
@@ -588,21 +612,33 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     setZoom(newZoom); setPan(newPan)
   }
 
-  function getCenterOffset() {
+  function getBaseZoom() {
     const canvas = fpCanvasRef.current
-    if (!canvas || !wrapRef.current) return { x: 0, y: 0 }
+    if (!canvas || !wrapRef.current) return 1
     const wr = wrapRef.current.getBoundingClientRect()
     const cw = parseFloat(canvas.style.width) || 0
     const ch = parseFloat(canvas.style.height) || 0
+    if (!cw || !ch) return 1
+    return Math.min(wr.width / cw, wr.height / ch, 1)
+  }
+
+  function getCenterOffset(zoomLevel) {
+    const canvas = fpCanvasRef.current
+    if (!canvas || !wrapRef.current) return { x: 0, y: 0 }
+    const wr = wrapRef.current.getBoundingClientRect()
+    const z = zoomLevel ?? zoomRef.current
+    const cw = (parseFloat(canvas.style.width) || 0) * z
+    const ch = (parseFloat(canvas.style.height) || 0) * z
     return { x: Math.max(0, (wr.width - cw) / 2), y: Math.max(0, (wr.height - ch) / 2) }
   }
 
   function zoomOut() {
-    const newZoom = Math.max(zoomRef.current * 0.8, 1)
+    const base = baseZoomRef.current || 1
+    const newZoom = Math.max(zoomRef.current * 0.8, base)
     const wr = wrapRef.current.getBoundingClientRect()
     const cx = wr.width / 2, cy = wr.height / 2
-    const newPan = newZoom === 1
-      ? getCenterOffset()
+    const newPan = newZoom === base
+      ? getCenterOffset(newZoom)
       : {
           x: cx - (cx - panRef.current.x) * (newZoom / zoomRef.current),
           y: cy - (cy - panRef.current.y) * (newZoom / zoomRef.current),
@@ -612,9 +648,10 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   }
 
   function resetView() {
-    const centered = getCenterOffset()
-    zoomRef.current = 1; panRef.current = centered
-    setZoom(1); setPan(centered)
+    const base = baseZoomRef.current || getBaseZoom()
+    const centered = getCenterOffset(base)
+    zoomRef.current = base; panRef.current = centered
+    setZoom(base); setPan(centered)
   }
 
   function getSizeForDevice(dtype) {
@@ -648,7 +685,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         <button onClick={resetView} style={{ ...zoomBtn, fontSize: 11 }}>⌂</button>
       </div>
       <div style={{ position: 'absolute', bottom: 12, left: 12, zIndex: 10, fontSize: 10, color: '#888', background: 'rgba(255,255,255,0.85)', padding: '2px 7px', borderRadius: 4, pointerEvents: 'none' }}>
-        {Math.round(zoom * 100)}% · {zoom > 1 ? 'scroll or drag to pan · pinch / ⌘+scroll to zoom' : 'pinch / ⌘+scroll to zoom in'}
+        {Math.round((zoom / (baseZoomRef.current || 1)) * 100)}% · {zoom > (baseZoomRef.current || 1) + 0.001 ? 'scroll or drag to pan · pinch / ⌘+scroll to zoom' : 'pinch / ⌘+scroll to zoom in'}
       </div>
 
       <div
