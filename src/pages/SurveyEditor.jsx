@@ -36,6 +36,7 @@ export default function SurveyEditor() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
+  const [saveError, setSaveError] = useState('') // persistent, inline — never the full-page `error` takeover
   const [error, setError] = useState('')
 
   // Non-disruptive "someone else changed this since you loaded it"
@@ -117,6 +118,7 @@ export default function SurveyEditor() {
     lastKnownUpdatedAt.current = data.updated_at
     setConflict(null)
     setConflictEditorName('')
+    setSaveError('')
     setDevices(data.devices || [])
     setCables(data.cables || [])
     setSvgMarkup(data.svg_markup || '')
@@ -171,12 +173,19 @@ export default function SurveyEditor() {
     saveTimer.current = setTimeout(async () => {
       setSaving(true)
       const pending = { devices: devs, cables: cabs, svg_markup: markup, px_per_ft: scale, icon_sizes: iSizes, label_sizes: lSizes }
-      const { data, conflict: hasConflict, latest } = await saveSurvey(id, pending, {
+      const { data, error: saveFailure, conflict: hasConflict, latest } = await saveSurvey(id, pending, {
         expectedUpdatedAt: lastKnownUpdatedAt.current,
         updatedBy: user?.id,
       })
       setSaving(false)
       if (hasConflict) { await handleConflict(latest, pending); return }
+      // Inline, non-disruptive failure indicator rather than the
+      // full-page `error` state — autosave fires repeatedly while
+      // someone keeps working, so a takeover here would wipe out the
+      // editor on every debounce tick until the underlying permission
+      // or connectivity issue is fixed.
+      if (saveFailure) { setSaveError(saveFailure.message); return }
+      setSaveError('')
       if (data?.[0]?.updated_at) lastKnownUpdatedAt.current = data[0].updated_at
       setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
     }, 1200)
@@ -191,13 +200,14 @@ export default function SurveyEditor() {
     clearTimeout(saveTimer.current)
     setSaving(true)
     const pending = { devices, cables, svg_markup: svgMarkup, px_per_ft: pxPerFt, icon_sizes: iconSizes, label_sizes: labelSizes }
-    const { data, error, conflict: hasConflict, latest } = await saveSurvey(id, pending, {
+    const { data, error: saveFailure, conflict: hasConflict, latest } = await saveSurvey(id, pending, {
       expectedUpdatedAt: lastKnownUpdatedAt.current,
       updatedBy: user?.id,
     })
     setSaving(false)
     if (hasConflict) { await handleConflict(latest, pending); return }
-    if (error) { setError('Save failed: ' + error.message); return }
+    if (saveFailure) { setSaveError(saveFailure.message); return }
+    setSaveError('')
     if (data?.[0]?.updated_at) lastKnownUpdatedAt.current = data[0].updated_at
     setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
   }
@@ -208,6 +218,7 @@ export default function SurveyEditor() {
   // whether to redo their change on top of it.
   async function resolveConflictReload() {
     setConflict(null)
+    setSaveError('')
     await loadSurvey()
   }
 
@@ -215,15 +226,19 @@ export default function SurveyEditor() {
   // the expectedUpdatedAt check this time so it's not rejected again.
   // This does overwrite the other person's change; it's an explicit,
   // informed choice rather than the silent overwrite we're trying to
-  // prevent.
+  // prevent. Still checked for a silent zero-row failure (e.g. RLS)
+  // rather than trusting `!error` alone — that's exactly the bug that
+  // let a previous "Overwrite theirs" click report success when it
+  // hadn't actually written anything.
   async function resolveConflictOverwrite() {
     const pending = conflict?.pending
     if (!pending) return
     setConflict(null)
     setSaving(true)
-    const { data, error } = await saveSurvey(id, pending, { updatedBy: user?.id })
+    const { data, error: saveFailure } = await saveSurvey(id, pending, { updatedBy: user?.id })
     setSaving(false)
-    if (error) { setError('Save failed: ' + error.message); return }
+    if (saveFailure) { setSaveError(saveFailure.message); return }
+    setSaveError('')
     if (data?.[0]?.updated_at) lastKnownUpdatedAt.current = data[0].updated_at
     setSaveMsg('Saved (overwrote their changes)'); setTimeout(() => setSaveMsg(''), 3000)
   }
@@ -234,7 +249,6 @@ export default function SurveyEditor() {
   async function resolveConflictSaveCopy() {
     const pending = conflict?.pending
     if (!pending || !user?.id) return
-    setConflict(null)
     setSaving(true)
     const { data: newSurvey, error: createError } = await createSurvey(
       user.id,
@@ -243,11 +257,23 @@ export default function SurveyEditor() {
     )
     if (createError || !newSurvey) {
       setSaving(false)
-      setError('Could not create a copy: ' + (createError?.message || 'unknown error'))
+      setSaveError('Could not create a copy: ' + (createError?.message || 'unknown error'))
       return
     }
-    await saveSurvey(newSurvey.id, pending, { updatedBy: user?.id })
+    const { error: copySaveError } = await saveSurvey(newSurvey.id, pending, { updatedBy: user?.id })
     setSaving(false)
+    if (copySaveError) {
+      // The (empty) copy record exists, but writing the pending edits
+      // into it failed. Deliberately don't navigate there — that would
+      // trigger this editor's load-on-id-change effect and overwrite
+      // our still-unsaved local edits with the empty copy fetched from
+      // the server. Keep the conflict banner up instead so the person
+      // can retry or pick a different resolution without losing work.
+      setSaveError('Could not save your edits into the copy: ' + copySaveError.message)
+      setConflict({ latest: conflict.latest, pending })
+      return
+    }
+    setConflict(null)
     navigate(`/survey/${newSurvey.id}`)
   }
 
@@ -848,10 +874,27 @@ export default function SurveyEditor() {
             <i className="ti ti-device-floppy" /> Save
           </button>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: saving ? '#BA7517' : '#1D9E75' }}>
-          {saving ? 'Saving…' : saveMsg}
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: saving ? '#BA7517' : (saveError ? '#A32D2D' : '#1D9E75') }}>
+          {saving ? 'Saving…' : (saveError ? 'Not saved' : saveMsg)}
         </span>
       </div>
+
+      {saveError && !conflict && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '8px 14px', background: '#FDECEC', borderBottom: '0.5px solid #F0AFAF',
+          fontSize: 12.5, color: '#7A1F1F', flexShrink: 0,
+        }}>
+          <i className="ti ti-alert-circle" style={{ color: '#A32D2D', fontSize: 15 }} />
+          <span style={{ flex: '1 1 320px' }}>
+            <strong>Your last save didn't go through:</strong> {saveError} Your edits are still here in the editor —
+            they just haven't reached the server yet.
+          </span>
+          <button onClick={handleSaveNow} style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }}>
+            <i className="ti ti-refresh" /> Retry save
+          </button>
+        </div>
+      )}
 
       {conflict && (
         <div style={{

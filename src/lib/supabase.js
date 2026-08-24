@@ -99,10 +99,25 @@ export async function saveSurvey(id, updates, { expectedUpdatedAt = null, update
   const { data, error } = await query.select('updated_at')
   if (error) return { data: null, error, conflict: false }
 
-  if (expectedUpdatedAt && (!data || data.length === 0)) {
-    const { data: latest, error: latestError } = await getSurvey(id)
-    return { data: null, error: latestError, conflict: true, latest }
+  // Zero rows updated always means the write didn't actually happen —
+  // either someone else's save landed first (when we scoped to
+  // expectedUpdatedAt), or RLS silently blocked it (e.g. no update
+  // permission on this survey), or the row no longer exists. Postgres/
+  // PostgREST don't raise an error for an update that matches nothing,
+  // so `!error` alone is not proof of success — we have to check the
+  // returned row count ourselves.
+  if (!data || data.length === 0) {
+    if (expectedUpdatedAt) {
+      const { data: latest, error: latestError } = await getSurvey(id)
+      return { data: null, error: latestError, conflict: true, latest }
+    }
+    return {
+      data: null,
+      error: new Error("Save didn't take effect — you may not have permission to edit this survey, or it no longer exists."),
+      conflict: false,
+    }
   }
+
 
   return { data, error: null, conflict: false }
 }
