@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getSurvey, getSurveyByToken, getSurveys, saveSurvey, createSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices, updatePortMapperRackName } from '../lib/supabase'
+import { getSurvey, getSurveyByToken, getSurveys, saveSurvey, createSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices, updatePortMapperRackName, getProfileById } from '../lib/supabase'
+import { useAuth } from '../hooks/useAuth'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES, COLOR_PALETTE } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
@@ -29,12 +30,21 @@ export default function SurveyEditor() {
   const { id, token } = useParams()
   const navigate = useNavigate()
   const isShared = Boolean(token)
+  const { user } = useAuth()
 
   const [survey, setSurvey] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
   const [error, setError] = useState('')
+
+  // Non-disruptive "someone else changed this since you loaded it"
+  // banner. Set only when a save comes back with conflict: true; holds
+  // both the server's current copy (`latest`) and the local edits that
+  // couldn't be saved (`pending`), so the person can choose to reload,
+  // overwrite, or keep their own version as a new survey.
+  const [conflict, setConflict] = useState(null)
+  const [conflictEditorName, setConflictEditorName] = useState('')
 
   const [devices, setDevices] = useState([])
   const [cables, setCables] = useState([])
@@ -89,6 +99,11 @@ export default function SurveyEditor() {
   const canvasRef = useRef(null)
   const devicePhotoInputRef = useRef(null)
   const saveTimer = useRef(null)
+  // Tracks the updated_at we last loaded/saved successfully — the
+  // optimistic-concurrency token passed to saveSurvey. A ref (not state)
+  // because scheduleSave's debounce timer needs the latest value without
+  // re-subscribing to it on every keystroke/drag.
+  const lastKnownUpdatedAt = useRef(null)
 
   useEffect(() => {
     loadSurvey()
@@ -99,6 +114,9 @@ export default function SurveyEditor() {
     const { data, error } = token ? await getSurveyByToken(token) : await getSurvey(id)
     if (error || !data) { setError('Survey not found.'); setLoading(false); return }
     setSurvey(data)
+    lastKnownUpdatedAt.current = data.updated_at
+    setConflict(null)
+    setConflictEditorName('')
     setDevices(data.devices || [])
     setCables(data.cables || [])
     setSvgMarkup(data.svg_markup || '')
@@ -133,15 +151,36 @@ export default function SurveyEditor() {
   // one had just saved. Routing every kind of edit through the same
   // debounce timer means there's only ever one save in flight, always
   // carrying the complete, current state.
+  // Shared conflict handling for both the debounced autosave and the
+  // explicit "Save" button: on a clean save, remember the new
+  // updated_at as our concurrency token; on a conflict, surface the
+  // banner (and look up who made the other change) instead of retrying
+  // or losing the pending edits.
+  async function handleConflict(latest, pending) {
+    setConflict({ latest, pending })
+    setConflictEditorName('')
+    if (latest?.updated_by) {
+      const { data: profile } = await getProfileById(latest.updated_by)
+      if (profile) setConflictEditorName(profile.full_name || profile.email || '')
+    }
+  }
+
   const scheduleSave = useCallback((devs, cabs, markup, scale, iSizes, lSizes) => {
     if (isShared) return
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       setSaving(true)
-      await saveSurvey(id, { devices: devs, cables: cabs, svg_markup: markup, px_per_ft: scale, icon_sizes: iSizes, label_sizes: lSizes })
-      setSaving(false); setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
+      const pending = { devices: devs, cables: cabs, svg_markup: markup, px_per_ft: scale, icon_sizes: iSizes, label_sizes: lSizes }
+      const { data, conflict: hasConflict, latest } = await saveSurvey(id, pending, {
+        expectedUpdatedAt: lastKnownUpdatedAt.current,
+        updatedBy: user?.id,
+      })
+      setSaving(false)
+      if (hasConflict) { await handleConflict(latest, pending); return }
+      if (data?.[0]?.updated_at) lastKnownUpdatedAt.current = data[0].updated_at
+      setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
     }, 1200)
-  }, [id, isShared])
+  }, [id, isShared, user])
 
   // Explicit, immediate save — bypasses the debounce entirely, for
   // when someone wants a definite confirmation right now rather than
@@ -151,10 +190,65 @@ export default function SurveyEditor() {
     if (isShared) return
     clearTimeout(saveTimer.current)
     setSaving(true)
-    const { error } = await saveSurvey(id, { devices, cables, svg_markup: svgMarkup, px_per_ft: pxPerFt, icon_sizes: iconSizes, label_sizes: labelSizes })
+    const pending = { devices, cables, svg_markup: svgMarkup, px_per_ft: pxPerFt, icon_sizes: iconSizes, label_sizes: labelSizes }
+    const { data, error, conflict: hasConflict, latest } = await saveSurvey(id, pending, {
+      expectedUpdatedAt: lastKnownUpdatedAt.current,
+      updatedBy: user?.id,
+    })
+    setSaving(false)
+    if (hasConflict) { await handleConflict(latest, pending); return }
+    if (error) { setError('Save failed: ' + error.message); return }
+    if (data?.[0]?.updated_at) lastKnownUpdatedAt.current = data[0].updated_at
+    setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
+  }
+
+  // ── Conflict resolution ──────────────────────────────────────────────
+  // "Load their version" — discard the pending local edit and refetch,
+  // so the person sees exactly what's on the server before deciding
+  // whether to redo their change on top of it.
+  async function resolveConflictReload() {
+    setConflict(null)
+    await loadSurvey()
+  }
+
+  // "Keep mine" — save the pending edits anyway, deliberately skipping
+  // the expectedUpdatedAt check this time so it's not rejected again.
+  // This does overwrite the other person's change; it's an explicit,
+  // informed choice rather than the silent overwrite we're trying to
+  // prevent.
+  async function resolveConflictOverwrite() {
+    const pending = conflict?.pending
+    if (!pending) return
+    setConflict(null)
+    setSaving(true)
+    const { data, error } = await saveSurvey(id, pending, { updatedBy: user?.id })
     setSaving(false)
     if (error) { setError('Save failed: ' + error.message); return }
-    setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
+    if (data?.[0]?.updated_at) lastKnownUpdatedAt.current = data[0].updated_at
+    setSaveMsg('Saved (overwrote their changes)'); setTimeout(() => setSaveMsg(''), 3000)
+  }
+
+  // "Save as a copy" — keeps both versions: the server keeps whatever
+  // the other person saved, and the pending local edits land in a brand
+  // new survey the person is redirected into.
+  async function resolveConflictSaveCopy() {
+    const pending = conflict?.pending
+    if (!pending || !user?.id) return
+    setConflict(null)
+    setSaving(true)
+    const { data: newSurvey, error: createError } = await createSurvey(
+      user.id,
+      `${survey?.name || 'Survey'} (your copy)`,
+      survey?.project_id || null
+    )
+    if (createError || !newSurvey) {
+      setSaving(false)
+      setError('Could not create a copy: ' + (createError?.message || 'unknown error'))
+      return
+    }
+    await saveSurvey(newSurvey.id, pending, { updatedBy: user?.id })
+    setSaving(false)
+    navigate(`/survey/${newSurvey.id}`)
   }
 
   function updateDevices(newDevs) { setDevices(newDevs); scheduleSave(newDevs, cables, svgMarkup, pxPerFt, iconSizes, labelSizes) }
@@ -758,6 +852,31 @@ export default function SurveyEditor() {
           {saving ? 'Saving…' : saveMsg}
         </span>
       </div>
+
+      {conflict && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '8px 14px', background: '#FFF7E6', borderBottom: '0.5px solid #F0D488',
+          fontSize: 12.5, color: '#5A4200', flexShrink: 0,
+        }}>
+          <i className="ti ti-alert-triangle" style={{ color: '#BA7517', fontSize: 15 }} />
+          <span style={{ flex: '1 1 320px' }}>
+            <strong>{conflictEditorName ? `${conflictEditorName} saved changes` : 'Someone else saved changes'}</strong> to
+            this survey while you had it open. Your unsaved edits are safe for now — choose how to proceed:
+          </span>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            <button onClick={resolveConflictReload} style={{ ...tbBtn, color: '#5A4200', borderColor: '#F0D488' }}>
+              <i className="ti ti-refresh" /> Load their version
+            </button>
+            <button onClick={resolveConflictSaveCopy} style={{ ...tbBtn, color: '#378ADD', borderColor: '#A9CDEF' }}>
+              <i className="ti ti-copy" /> Keep mine as a copy
+            </button>
+            <button onClick={resolveConflictOverwrite} style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }}>
+              <i className="ti ti-device-floppy" /> Overwrite theirs
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 

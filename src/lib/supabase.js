@@ -71,11 +71,40 @@ export async function createSurvey(userId, name, projectId = null) {
     .single()
 }
 
-export async function saveSurvey(id, updates) {
-  return supabase
+// Saves survey changes with optional optimistic-concurrency checking.
+//
+// If `expectedUpdatedAt` is passed, the update is scoped to rows that
+// still have that exact updated_at — i.e. "only save if nobody else has
+// saved since I loaded this". If the row has moved on (someone else's
+// save landed first), the .eq() match fails, zero rows are updated, and
+// we come back with `conflict: true` plus the current server copy of the
+// survey so the caller can show a "someone else changed this" banner
+// instead of silently overwriting it on the next autosave tick.
+//
+// Omitting `expectedUpdatedAt` skips the check entirely (existing
+// behavior) — used for an explicit "overwrite anyway" resolution, or for
+// smaller one-off field updates where a conflict is far less costly.
+export async function saveSurvey(id, updates, { expectedUpdatedAt = null, updatedBy = null } = {}) {
+  let query = supabase
     .from('surveys')
-    .update({ ...updates, updated_at: new Date().toISOString() })
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString(),
+      ...(updatedBy ? { updated_by: updatedBy } : {}),
+    })
     .eq('id', id)
+
+  if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt)
+
+  const { data, error } = await query.select('updated_at')
+  if (error) return { data: null, error, conflict: false }
+
+  if (expectedUpdatedAt && (!data || data.length === 0)) {
+    const { data: latest, error: latestError } = await getSurvey(id)
+    return { data: null, error: latestError, conflict: true, latest }
+  }
+
+  return { data, error: null, conflict: false }
 }
 
 export async function deleteSurvey(id) {
@@ -216,6 +245,12 @@ export async function getProfiles() {
 
 export async function getMyProfile(userId) {
   return supabase.from('profiles').select('*').eq('id', userId).single()
+}
+
+// Used to attribute a conflicting save to a name in the "someone else
+// changed this" banner (survey.updated_by -> profiles.id).
+export async function getProfileById(id) {
+  return supabase.from('profiles').select('*').eq('id', id).maybeSingle()
 }
 
 export async function setUserAdmin(id, isAdmin) {
