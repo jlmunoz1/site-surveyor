@@ -133,6 +133,20 @@ export default function SurveyEditor() {
     }, 1200)
   }, [id, isShared])
 
+  // Explicit, immediate save — bypasses the debounce entirely, for
+  // when someone wants a definite confirmation right now rather than
+  // trusting the auto-save timer (e.g. after manually nudging a
+  // device back into place following the coordinate-system fix).
+  async function handleSaveNow() {
+    if (isShared) return
+    clearTimeout(saveTimer.current)
+    setSaving(true)
+    const { error } = await saveSurvey(id, { devices, cables, svg_markup: svgMarkup, px_per_ft: pxPerFt })
+    setSaving(false)
+    if (error) { setError('Save failed: ' + error.message); return }
+    setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
+  }
+
   function updateDevices(newDevs) { setDevices(newDevs); scheduleSave(newDevs, cables, svgMarkup, pxPerFt) }
   function applyGlobalAOCColor(color) {
     updateDevices(devices.map(d => d.dtype === 'rak-gw' ? { ...d, hmFillColor: color } : d))
@@ -725,6 +739,11 @@ export default function SurveyEditor() {
           ))}
         </div>
 
+        {!isShared && (
+          <button style={tbBtn} onClick={handleSaveNow} disabled={saving} title="Save immediately, without waiting for auto-save">
+            <i className="ti ti-device-floppy" /> Save
+          </button>
+        )}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: saving ? '#BA7517' : '#1D9E75' }}>
           {saving ? 'Saving…' : saveMsg}
         </span>
