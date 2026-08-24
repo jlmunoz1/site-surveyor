@@ -123,12 +123,22 @@ export default function SurveyEditor() {
     setLoading(false)
   }
 
-  const scheduleSave = useCallback((devs, cabs, markup, scale) => {
+  // Single, unified save path for everything — devices, cables, markup,
+  // scale, icon sizes, and label sizes all go through here together as
+  // one complete snapshot. Previously icon/label size changes fired
+  // their own separate, immediate, uncoordinated save calls alongside
+  // the debounced one used for everything else — if two independent
+  // save requests were in flight at the same time, whichever happened
+  // to finish last would win, silently reverting whatever the other
+  // one had just saved. Routing every kind of edit through the same
+  // debounce timer means there's only ever one save in flight, always
+  // carrying the complete, current state.
+  const scheduleSave = useCallback((devs, cabs, markup, scale, iSizes, lSizes) => {
     if (isShared) return
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       setSaving(true)
-      await saveSurvey(id, { devices: devs, cables: cabs, svg_markup: markup, px_per_ft: scale })
+      await saveSurvey(id, { devices: devs, cables: cabs, svg_markup: markup, px_per_ft: scale, icon_sizes: iSizes, label_sizes: lSizes })
       setSaving(false); setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
     }, 1200)
   }, [id, isShared])
@@ -141,33 +151,33 @@ export default function SurveyEditor() {
     if (isShared) return
     clearTimeout(saveTimer.current)
     setSaving(true)
-    const { error } = await saveSurvey(id, { devices, cables, svg_markup: svgMarkup, px_per_ft: pxPerFt })
+    const { error } = await saveSurvey(id, { devices, cables, svg_markup: svgMarkup, px_per_ft: pxPerFt, icon_sizes: iconSizes, label_sizes: labelSizes })
     setSaving(false)
     if (error) { setError('Save failed: ' + error.message); return }
     setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
   }
 
-  function updateDevices(newDevs) { setDevices(newDevs); scheduleSave(newDevs, cables, svgMarkup, pxPerFt) }
+  function updateDevices(newDevs) { setDevices(newDevs); scheduleSave(newDevs, cables, svgMarkup, pxPerFt, iconSizes, labelSizes) }
   function applyGlobalAOCColor(color) {
     updateDevices(devices.map(d => d.dtype === 'rak-gw' ? { ...d, hmFillColor: color } : d))
   }
   function applyGlobalAOCRange(rangeFt) {
     updateDevices(devices.map(d => d.dtype === 'rak-gw' ? { ...d, hmRangeFt: rangeFt } : d))
   }
-  function updateCables(newCabs) { setCables(newCabs); scheduleSave(devices, newCabs, svgMarkup, pxPerFt) }
-  function updateMarkup(m) { setSvgMarkup(m); scheduleSave(devices, cables, m, pxPerFt) }
-  function updateScale(s) { setPxPerFt(s); scheduleSave(devices, cables, svgMarkup, s) }
+  function updateCables(newCabs) { setCables(newCabs); scheduleSave(devices, newCabs, svgMarkup, pxPerFt, iconSizes, labelSizes) }
+  function updateMarkup(m) { setSvgMarkup(m); scheduleSave(devices, cables, m, pxPerFt, iconSizes, labelSizes) }
+  function updateScale(s) { setPxPerFt(s); scheduleSave(devices, cables, svgMarkup, s, iconSizes, labelSizes) }
   function updateIconSize(category, s) {
     const v = Math.max(4, Math.min(80, s))
     const newSizes = { ...iconSizes, [category]: v }
     setIconSizes(newSizes)
-    saveSurvey(id, { icon_sizes: newSizes })
+    scheduleSave(devices, cables, svgMarkup, pxPerFt, newSizes, labelSizes)
   }
   function updateLabelSize(category, s) {
     const v = Math.max(6, Math.min(60, s))
     const newSizes = { ...labelSizes, [category]: v }
     setLabelSizes(newSizes)
-    saveSurvey(id, { label_sizes: newSizes })
+    scheduleSave(devices, cables, svgMarkup, pxPerFt, iconSizes, newSizes)
   }
 
   function handleDeviceAdd(data) {
