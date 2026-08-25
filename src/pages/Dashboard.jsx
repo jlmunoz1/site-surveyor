@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { getPdfPageCount } from '../lib/pdf'
 import {
   getSurveys, createSurvey, deleteSurvey, signOut,
-  getProjects, createProject, deleteProject, getProfiles,
+  getProjects, createProject, deleteProject, getProfiles, renameProject,
   syncProjectToPortMapper, setProjectPortMapperSiteId,
   uploadFloorPlan, saveSurvey,
   getProjectMembers, inviteToProject, removeProjectMember, sendProjectInviteEmail,
@@ -38,6 +38,11 @@ export default function Dashboard() {
   // Expanded projects
   const [expanded, setExpanded] = useState({})
   const [uploadingPlanFor, setUploadingPlanFor] = useState(null) // project id currently uploading
+
+  // Click-to-edit project name — mirrors the survey editor's rename
+  // pattern (click name, edit inline, blur/Enter to save).
+  const [editingProjectId, setEditingProjectId] = useState(null)
+  const [projectNameInput, setProjectNameInput] = useState('')
   const [shareProject, setShareProject] = useState(null) // project object currently being shared
   const [members, setMembers] = useState([])
   const [loadingMembers, setLoadingMembers] = useState(false)
@@ -94,6 +99,22 @@ export default function Dashboard() {
       setError(`Project created, but couldn't sync to Port Mapper: ${syncError}`)
     } else if (site?.id) {
       await setProjectPortMapperSiteId(data.id, site.id)
+    }
+  }
+
+  async function handleRenameProject(project) {
+    const trimmed = projectNameInput.trim()
+    setEditingProjectId(null)
+    if (!trimmed || trimmed === project.name) return
+    // Optimistic update so the name doesn't flicker back while the
+    // request is in flight; rolled back below if it turns out RLS
+    // silently rejected the write.
+    const previousName = project.name
+    setProjects(ps => ps.map(p => p.id === project.id ? { ...p, name: trimmed } : p))
+    const { error } = await renameProject(project.id, trimmed)
+    if (error) {
+      setProjects(ps => ps.map(p => p.id === project.id ? { ...p, name: previousName } : p))
+      setError('Rename failed: ' + error.message)
     }
   }
 
@@ -321,7 +342,36 @@ export default function Dashboard() {
                     onClick={() => setExpanded(e => ({ ...e, [project.id]: !e[project.id] }))}>
                     <i className={`ti ti-chevron-${isOpen ? 'down' : 'right'}`} style={{ fontSize: 14, color: '#888' }} />
                     <i className="ti ti-folder" style={{ fontSize: 16, color: '#534AB7' }} />
-                    <span style={{ fontSize: 14, fontWeight: 500, color: '#1a1a18' }}>{project.name}</span>
+                    {editingProjectId === project.id ? (
+                      <input
+                        autoFocus
+                        value={projectNameInput}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => setProjectNameInput(e.target.value)}
+                        onBlur={() => handleRenameProject(project)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleRenameProject(project)
+                          if (e.key === 'Escape') setEditingProjectId(null)
+                        }}
+                        style={{ fontSize: 14, fontWeight: 500, color: '#1a1a18', background: '#fff', border: '0.5px solid #378ADD', borderRadius: 6, padding: '2px 7px', outline: 'none', width: 220 }}
+                      />
+                    ) : (
+                      <span
+                        onClick={e => {
+                          if (!isMine && !isAdmin) return
+                          e.stopPropagation()
+                          setProjectNameInput(project.name)
+                          setEditingProjectId(project.id)
+                        }}
+                        title={(isMine || isAdmin) ? 'Click to rename' : ''}
+                        style={{ fontSize: 14, fontWeight: 500, color: '#1a1a18', cursor: (isMine || isAdmin) ? 'text' : 'default', padding: '2px 5px', borderRadius: 6, border: '0.5px solid transparent' }}
+                        onMouseEnter={e => { if (isMine || isAdmin) e.currentTarget.style.borderColor = '#e0dfd8' }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent' }}
+                      >
+                        {project.name}
+                        {(isMine || isAdmin) && <i className="ti ti-pencil" style={{ fontSize: 10, color: '#aaa', marginLeft: 5 }} />}
+                      </span>
+                    )}
                     {!isMine && (
                       <span style={{ fontSize: 10, color: '#888', background: '#eeede7', padding: '2px 7px', borderRadius: 5 }}>
                         {ownerLabel(project.user_id)}

@@ -140,6 +140,19 @@ export async function createProject(userId, name) {
   return supabase.from('projects').insert({ user_id: userId, name }).select().single()
 }
 
+// Renames a project. Same defensive pattern as saveSurvey: Postgres RLS
+// silently matches zero rows on a blocked update rather than raising an
+// error, so `!error` alone isn't proof the rename actually happened —
+// we check the row count came back before reporting success.
+export async function renameProject(id, name) {
+  const { data, error } = await supabase.from('projects').update({ name }).eq('id', id).select('id')
+  if (error) return { data: null, error }
+  if (!data || data.length === 0) {
+    return { data: null, error: new Error("Rename didn't take effect — you may not have permission to edit this project.") }
+  }
+  return { data, error: null }
+}
+
 export async function deleteProject(id) {
   const { error } = await supabase.from('projects').delete().eq('id', id)
   return { error }
