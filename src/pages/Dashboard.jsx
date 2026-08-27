@@ -5,11 +5,12 @@ import { v4 as uuidv4 } from 'uuid'
 import { getPdfPageCount } from '../lib/pdf'
 import {
   getSurveys, createSurvey, deleteSurvey, signOut,
-  getProjects, createProject, deleteProject, getProfiles, renameProject,
+  getProjects, createProject, deleteProject, getProfiles, renameProject, updateProjectAddress,
   syncProjectToPortMapper, setProjectPortMapperSiteId,
   uploadFloorPlan, saveSurvey,
   getProjectMembers, inviteToProject, removeProjectMember, sendProjectInviteEmail,
 } from '../lib/supabase'
+import { geocodeAddress } from '../lib/geocode'
 
 export default function Dashboard() {
   const { user, isAdmin } = useAuth()
@@ -43,6 +44,12 @@ export default function Dashboard() {
   // pattern (click name, edit inline, blur/Enter to save).
   const [editingProjectId, setEditingProjectId] = useState(null)
   const [projectNameInput, setProjectNameInput] = useState('')
+
+  // Site address, editable per project — geocoded on save so the
+  // georeferencing map can jump straight to the right building.
+  const [editingAddressId, setEditingAddressId] = useState(null)
+  const [addressInput, setAddressInput] = useState('')
+  const [geocodingAddressId, setGeocodingAddressId] = useState(null) // project id currently being geocoded, or null
   const [shareProject, setShareProject] = useState(null) // project object currently being shared
   const [members, setMembers] = useState([])
   const [loadingMembers, setLoadingMembers] = useState(false)
@@ -116,6 +123,37 @@ export default function Dashboard() {
       setProjects(ps => ps.map(p => p.id === project.id ? { ...p, name: previousName } : p))
       setError('Rename failed: ' + error.message)
     }
+  }
+
+  async function handleSaveAddress(project) {
+    const trimmed = addressInput.trim()
+    setEditingAddressId(null)
+    if (trimmed === (project.address || '')) return
+
+    if (!trimmed) {
+      // Cleared the address entirely — no need to geocode anything.
+      const { error } = await updateProjectAddress(project.id, '', null, null)
+      if (error) { setError('Could not clear address: ' + error.message); return }
+      setProjects(ps => ps.map(p => p.id === project.id ? { ...p, address: '', address_lat: null, address_lng: null } : p))
+      return
+    }
+
+    setGeocodingAddressId(project.id)
+    const { lat, lng, error: geoError } = await geocodeAddress(trimmed)
+    setGeocodingAddressId(null)
+    if (geoError) {
+      // Still save the typed address even if geocoding failed, so it's
+      // not lost — just without map coordinates yet. The georeference
+      // page will retry geocoding it live if lat/lng are missing.
+      setError(`Couldn't locate that address on the map (${geoError.message}). Saved the text anyway — you can fix it or geocode again later.`)
+      const { error } = await updateProjectAddress(project.id, trimmed, null, null)
+      if (!error) setProjects(ps => ps.map(p => p.id === project.id ? { ...p, address: trimmed, address_lat: null, address_lng: null } : p))
+      return
+    }
+
+    const { error } = await updateProjectAddress(project.id, trimmed, lat, lng)
+    if (error) { setError('Could not save address: ' + error.message); return }
+    setProjects(ps => ps.map(p => p.id === project.id ? { ...p, address: trimmed, address_lat: lat, address_lng: lng } : p))
   }
 
   function triggerFloorPlanUpload(project) {
@@ -399,6 +437,45 @@ export default function Dashboard() {
                       </button>
                     )}
                   </div>
+                  {(project.address || editingAddressId === project.id) && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 16px 8px 40px', fontSize: 11, color: '#888', background: '#f8f8f6' }}>
+                      <i className="ti ti-map-pin" style={{ fontSize: 12 }} />
+                      {editingAddressId === project.id ? (
+                        <input
+                          autoFocus
+                          value={addressInput}
+                          placeholder="123 Main St, City, State"
+                          onChange={e => setAddressInput(e.target.value)}
+                          onBlur={() => handleSaveAddress(project)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleSaveAddress(project)
+                            if (e.key === 'Escape') setEditingAddressId(null)
+                          }}
+                          style={{ fontSize: 11, color: '#444', background: '#fff', border: '0.5px solid #378ADD', borderRadius: 5, padding: '3px 7px', outline: 'none', width: 280 }}
+                        />
+                      ) : (
+                        <span
+                          onClick={() => { if (!isMine && !isAdmin) return; setAddressInput(project.address || ''); setEditingAddressId(project.id) }}
+                          title={(isMine || isAdmin) ? 'Click to edit address' : ''}
+                          style={{ cursor: (isMine || isAdmin) ? 'text' : 'default' }}
+                        >
+                          {project.address}
+                          {project.address_lat == null && <span style={{ color: '#BA7517', marginLeft: 6 }}>(not located on map yet)</span>}
+                        </span>
+                      )}
+                      {geocodingAddressId === project.id && <span style={{ color: '#378ADD' }}>Locating…</span>}
+                    </div>
+                  )}
+                  {!project.address && editingAddressId !== project.id && (isMine || isAdmin) && (
+                    <div style={{ padding: '2px 16px 6px 40px', background: '#f8f8f6' }}>
+                      <button
+                        onClick={() => { setAddressInput(''); setEditingAddressId(project.id) }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#aaa', fontSize: 11, padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <i className="ti ti-map-pin-plus" style={{ fontSize: 12 }} /> Add site address
+                      </button>
+                    </div>
+                  )}
                   {isOpen && (
                     <div style={{ borderTop: '0.5px solid #e0dfd8' }}>
                       {projectSurveys.length === 0 ? (

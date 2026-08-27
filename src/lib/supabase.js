@@ -153,6 +153,21 @@ export async function renameProject(id, name) {
   return { data, error: null }
 }
 
+// Sets a project's site address and its geocoded lat/lng (or clears
+// them if address is empty). Same zero-row check as renameProject.
+export async function updateProjectAddress(id, address, lat, lng) {
+  const { data, error } = await supabase
+    .from('projects')
+    .update({ address: address || null, address_lat: lat ?? null, address_lng: lng ?? null })
+    .eq('id', id)
+    .select('id')
+  if (error) return { data: null, error }
+  if (!data || data.length === 0) {
+    return { data: null, error: new Error("Address update didn't take effect — you may not have permission to edit this project.") }
+  }
+  return { data, error: null }
+}
+
 export async function deleteProject(id) {
   const { error } = await supabase.from('projects').delete().eq('id', id)
   return { error }

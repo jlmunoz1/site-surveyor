@@ -718,6 +718,9 @@ export default function SurveyEditor() {
                 <button style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }} onClick={handleDeleteFloorPlan}>
                   <i className="ti ti-x" /> Remove Plan
                 </button>
+                <button style={{ ...tbBtn, color: '#1D9E75', borderColor: '#9AD9BE' }} onClick={() => navigate(`/survey/${id}/georeference`)} title="Overlay this floor plan on satellite imagery">
+                  <i className="ti ti-map-pin" /> Georeference
+                </button>
               </>
             )}
             <input ref={fileInputRef} type="file" accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFloorPlanUpload} />
