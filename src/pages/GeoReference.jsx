@@ -5,7 +5,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { getSurvey, getProject, saveSurvey } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
-import { fitGeoTransform, computeCorners } from '../lib/geo'
+import { fitGeoTransform, computeCorners, estimateScale } from '../lib/geo'
 import { rotatedImageOverlay } from '../lib/RotatedImageOverlay'
 import { geocodeAddress } from '../lib/geocode'
 
@@ -251,6 +251,25 @@ export default function GeoReference() {
     return computeCorners(transform, displayDims.w, displayDims.h)
   }, [transform, displayDims])
 
+  // Real-world scale derived from the satellite-verified control
+  // points, in the same px/ft unit the main editor uses for coverage
+  // and heatmap math — computed here so it can be pushed into the
+  // survey's actual px_per_ft field instead of sitting unused.
+  const scaleEstimate = useMemo(() => estimateScale(transform), [transform])
+  const [scaleApplied, setScaleApplied] = useState(false)
+  const [applyingScale, setApplyingScale] = useState(false)
+
+  async function handleApplyScale() {
+    if (!scaleEstimate?.pxPerFt) return
+    setApplyingScale(true)
+    const { error: saveFailure } = await saveSurvey(id, { px_per_ft: scaleEstimate.pxPerFt }, { updatedBy: user?.id })
+    setApplyingScale(false)
+    if (saveFailure) { setError('Could not apply scale: ' + saveFailure.message); return }
+    setSurvey(s => ({ ...s, px_per_ft: scaleEstimate.pxPerFt }))
+    setScaleApplied(true)
+    setTimeout(() => setScaleApplied(false), 2500)
+  }
+
   // ── Draw / update the floor plan overlay on the map ─────────────────
   useEffect(() => {
     if (!mapRef.current) return
@@ -482,6 +501,30 @@ export default function GeoReference() {
               {transform
                 ? 'MDF/IDF pins are previewed on the map at their real-world position.'
                 : 'Add 2+ points to preview MDF/IDF pins at their real-world position.'}
+            </div>
+          )}
+          {scaleEstimate?.pxPerFt && (
+            <div style={{ padding: '10px 12px', borderTop: '0.5px solid #e0dfd8', fontSize: 11, color: '#444' }}>
+              <div style={{ color: '#888', marginBottom: 4 }}>Scale, from your control points:</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{scaleEstimate.pxPerFt.toFixed(2)} px/ft</div>
+              <div style={{ color: '#888', marginTop: 2 }}>
+                Currently on this floor plan: {typeof survey?.px_per_ft === 'number' ? `${survey.px_per_ft.toFixed(2)} px/ft` : 'not set'}
+              </div>
+              {scaleEstimate.skewPct > 5 && (
+                <div style={{ color: '#BA7517', marginTop: 6, fontSize: 10.5 }}>
+                  <i className="ti ti-alert-triangle" /> Horizontal and vertical scale disagree by {scaleEstimate.skewPct.toFixed(0)}% — double-check your control points, or the scan itself may be stretched.
+                </div>
+              )}
+              <button
+                onClick={handleApplyScale}
+                disabled={applyingScale}
+                style={{ ...primaryBtn, width: '100%', justifyContent: 'center', marginTop: 8, fontSize: 11, padding: '6px 10px' }}
+              >
+                <i className="ti ti-ruler-2" /> {applyingScale ? 'Applying…' : (scaleApplied ? 'Applied ✓' : 'Apply this scale to the floor plan')}
+              </button>
+              <div style={{ color: '#aaa', marginTop: 6, fontSize: 10 }}>
+                This updates px_per_ft on this survey — the same scale used for heat maps, coverage circles, and measurements in the editor.
+              </div>
             </div>
           )}
         </div>

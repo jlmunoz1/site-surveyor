@@ -154,3 +154,44 @@ export function computeCorners(transform, imageWidth, imageHeight) {
     bottomLeft: transform.apply(0, imageHeight),
   }
 }
+
+// Haversine great-circle distance between two lat/lng points, in
+// meters. Used to measure real-world distance for scale estimation —
+// simple, standard, and plenty accurate at building scale (the flat-
+// earth local projection above is used for the transform FIT itself;
+// this is used only for reporting a distance back to the person).
+export function haversineMeters(lat1, lng1, lat2, lng2) {
+  const toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(a))
+}
+
+const METERS_PER_FOOT = 0.3048
+
+// Estimates the floor plan's real-world scale, in the same
+// pixels-per-foot unit Site Surveyor already uses for coverage/heatmap
+// math (survey.px_per_ft) — derived from the satellite-verified control
+// points instead of a manual guess. Samples the fitted transform along
+// the pixel x-axis and y-axis and measures the real-world distance
+// each covers; averages the two, since a 3+-point affine fit can end
+// up with slightly different x/y scale (a genuinely stretched scan) —
+// one averaged number is what a single px_per_ft field can represent.
+export function estimateScale(transform) {
+  if (!transform) return null
+  const SAMPLE_PX = 1000 // arbitrary — the fitted transform is linear, so any offset gives the same ratio; a larger one just keeps floating-point error negligible
+  const origin = transform.apply(0, 0)
+  const alongX = transform.apply(SAMPLE_PX, 0)
+  const alongY = transform.apply(0, SAMPLE_PX)
+  const metersPerPxX = haversineMeters(origin.lat, origin.lng, alongX.lat, alongX.lng) / SAMPLE_PX
+  const metersPerPxY = haversineMeters(origin.lat, origin.lng, alongY.lat, alongY.lng) / SAMPLE_PX
+  const metersPerPx = (metersPerPxX + metersPerPxY) / 2
+  const feetPerPx = metersPerPx / METERS_PER_FOOT
+  const pxPerFt = feetPerPx > 0 ? 1 / feetPerPx : null
+  // How much the x and y scale disagree, as a % of their average — a
+  // large number here is a signal the scan itself is stretched
+  // unevenly (or a control point is off), not just estimation noise.
+  const skewPct = metersPerPx > 0 ? (Math.abs(metersPerPxX - metersPerPxY) / metersPerPx) * 100 : 0
+  return { pxPerFt, metersPerPxX, metersPerPxY, skewPct }
+}
