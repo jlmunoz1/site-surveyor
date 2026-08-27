@@ -12,10 +12,20 @@ import { geocodeAddress } from '../lib/geocode'
 const SATELLITE_LAYER = {
   url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   attribution: 'Tiles &copy; Esri — Esri, Maxar, Earthstar Geographics',
+  // Esri's actual imagery resolution tops out around zoom 19 in most
+  // US locations (sometimes lower in rural areas). Without
+  // maxNativeZoom, Leaflet keeps asking for tiles at higher {z} values
+  // that don't exist and just shows nothing past that point — which
+  // looks like "I can't zoom in any further." Setting maxNativeZoom
+  // lets it keep zooming past that by upscaling the last real tile
+  // (a bit blurry, but still usable for placing a control point) —
+  // the same trick Google Maps and similar apps use.
+  maxNativeZoom: 19,
 }
 const STREET_LAYER = {
   url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   attribution: '&copy; OpenStreetMap contributors',
+  maxNativeZoom: 19,
 }
 
 // A handful of distinguishable colors so a control point drawn on the
@@ -199,7 +209,7 @@ export default function GeoReference() {
     if (!mapDivRef.current || mapRef.current) return
     const map = L.map(mapDivRef.current, { zoomControl: true }).setView([34.0, -96.37], 17) // Durant, OK default; pan/zoom to the real site
     const layer = SATELLITE_LAYER
-    tileLayerRef.current = L.tileLayer(layer.url, { attribution: layer.attribution, maxZoom: 21 }).addTo(map)
+    tileLayerRef.current = L.tileLayer(layer.url, { attribution: layer.attribution, maxZoom: 22, maxNativeZoom: layer.maxNativeZoom }).addTo(map)
     map.on('click', e => handleMapClickRef.current(e.latlng.lat, e.latlng.lng))
     mapRef.current = map
 
@@ -224,7 +234,7 @@ export default function GeoReference() {
     if (!mapRef.current) return
     if (tileLayerRef.current) mapRef.current.removeLayer(tileLayerRef.current)
     const layer = basemap === 'satellite' ? SATELLITE_LAYER : STREET_LAYER
-    tileLayerRef.current = L.tileLayer(layer.url, { attribution: layer.attribution, maxZoom: 21 }).addTo(mapRef.current)
+    tileLayerRef.current = L.tileLayer(layer.url, { attribution: layer.attribution, maxZoom: 22, maxNativeZoom: layer.maxNativeZoom }).addTo(mapRef.current)
   }, [basemap])
 
   // If this survey was already georeferenced, jump the map to it so
@@ -428,7 +438,7 @@ export default function GeoReference() {
             <span style={{ flex: 1 }} />
             <button onClick={() => setPlanZoom(z => Math.max(25, z - 25))} style={ghostBtnSmall}><i className="ti ti-zoom-out" /></button>
             <span>{planZoom}%</span>
-            <button onClick={() => setPlanZoom(z => Math.min(400, z + 25))} style={ghostBtnSmall}><i className="ti ti-zoom-in" /></button>
+            <button onClick={() => setPlanZoom(z => Math.min(1600, z + (z >= 400 ? 100 : 25)))} style={ghostBtnSmall}><i className="ti ti-zoom-in" /></button>
           </div>
           <div ref={planContainerRef} style={{ flex: 1, overflow: 'auto', background: '#f2f2ef', position: 'relative' }}>
             {planLoadError && <div style={{ padding: 20, color: '#A32D2D', fontSize: 12 }}>{planLoadError}</div>}
