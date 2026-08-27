@@ -306,8 +306,8 @@ export default function GeoReference() {
       const color = POINT_COLORS[i % POINT_COLORS.length]
       const icon = L.divIcon({
         className: '',
-        html: `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;font-family:sans-serif;">${i + 1}</div>`,
-        iconSize: [22, 22], iconAnchor: [11, 11],
+        html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;font-family:sans-serif;cursor:grab;">${i + 1}</div>`,
+        iconSize: [30, 30], iconAnchor: [15, 15],
       })
       return L.marker([p.lat, p.lng], { icon, draggable: true })
         .on('drag', e => updatePoint(p.id, { lat: e.target.getLatLng().lat, lng: e.target.getLatLng().lng }))
@@ -372,6 +372,44 @@ export default function GeoReference() {
     } else {
       setPendingPixel({ px, py })
     }
+  }
+
+  // Lets a placed control point be dragged to a new spot on the floor
+  // plan, instead of the only fix being delete-and-reclick. Implemented
+  // by hand (not native HTML5 drag) since the marker is just an
+  // absolutely-positioned div over a canvas — plain mousedown/mousemove/
+  // mouseup (and touch equivalents) tracked on the window is the most
+  // reliable way to keep the marker following the cursor even if it
+  // moves faster than the div's own hit area.
+  function startDragPoint(e, pointId) {
+    e.preventDefault()
+    e.stopPropagation()
+    const canvas = planCanvasRef.current
+    if (!canvas || !displayDims) return
+
+    const getClientPos = (evt) => {
+      const t = evt.touches?.[0] || evt.changedTouches?.[0]
+      return t ? { x: t.clientX, y: t.clientY } : { x: evt.clientX, y: evt.clientY }
+    }
+
+    function onMove(evt) {
+      evt.preventDefault()
+      const { x, y } = getClientPos(evt)
+      const rect = canvas.getBoundingClientRect()
+      const relX = Math.min(1, Math.max(0, (x - rect.left) / rect.width))
+      const relY = Math.min(1, Math.max(0, (y - rect.top) / rect.height))
+      updatePoint(pointId, { px: relX * displayDims.w, py: relY * displayDims.h })
+    }
+    function onUp() {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchmove', onMove, { passive: false })
+    window.addEventListener('touchend', onUp)
   }
 
   const handleSave = useCallback(async () => {
@@ -460,16 +498,22 @@ export default function GeoReference() {
                 }} />
               )}
               {displayDims && points.map((p, i) => (
-                <div key={p.id} style={{
-                  position: 'absolute', pointerEvents: 'none',
-                  left: `${(p.px / displayDims.w) * 100}%`,
-                  top: `${(p.py / displayDims.h) * 100}%`,
-                  width: 22, height: 22, marginLeft: -11, marginTop: -11,
-                  borderRadius: '50%', background: POINT_COLORS[i % POINT_COLORS.length],
-                  border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: '#fff', fontSize: 11, fontWeight: 700,
-                }}>{i + 1}</div>
+                <div
+                  key={p.id}
+                  onMouseDown={e => startDragPoint(e, p.id)}
+                  onTouchStart={e => startDragPoint(e, p.id)}
+                  title="Drag to reposition"
+                  style={{
+                    position: 'absolute', cursor: 'grab', touchAction: 'none',
+                    left: `${(p.px / displayDims.w) * 100}%`,
+                    top: `${(p.py / displayDims.h) * 100}%`,
+                    width: 30, height: 30, marginLeft: -15, marginTop: -15,
+                    borderRadius: '50%', background: POINT_COLORS[i % POINT_COLORS.length],
+                    border: '3px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#fff', fontSize: 12, fontWeight: 700, userSelect: 'none',
+                  }}
+                >{i + 1}</div>
               ))}
             </div>
           </div>
