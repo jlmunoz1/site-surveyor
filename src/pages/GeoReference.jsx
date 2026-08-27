@@ -185,7 +185,16 @@ export default function GeoReference() {
     setOverlayImageSrc(canvas.toDataURL('image/png'))
   }
 
-  // ── Map setup (once) ─────────────────────────────────────────────────
+  // ── Map setup ────────────────────────────────────────────────────────
+  // Deliberately NOT a mount-once ([]) effect: while `loading` is still
+  // true, this component renders the "Loading…" branch instead of the
+  // real layout, so mapDivRef.current doesn't exist in the DOM yet. A
+  // [] effect would run exactly once, right then, see no div, and bail
+  // out for good — leaving the map permanently uncreated even after the
+  // real layout mounts a moment later. Re-running once loading flips to
+  // false (and the map's div actually exists) is what makes it work;
+  // the mapRef.current guard below still ensures it only ever runs once
+  // in practice.
   useEffect(() => {
     if (!mapDivRef.current || mapRef.current) return
     const map = L.map(mapDivRef.current, { zoomControl: true }).setView([34.0, -96.37], 17) // Durant, OK default; pan/zoom to the real site
@@ -208,7 +217,7 @@ export default function GeoReference() {
     requestAnimationFrame(() => map.invalidateSize())
 
     return () => { ro.disconnect(); map.remove(); mapRef.current = null }
-  }, [])
+  }, [loading, error])
 
   // Switch basemap tile layer without tearing down the whole map.
   useEffect(() => {
