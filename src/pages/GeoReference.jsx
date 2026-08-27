@@ -193,7 +193,21 @@ export default function GeoReference() {
     tileLayerRef.current = L.tileLayer(layer.url, { attribution: layer.attribution, maxZoom: 21 }).addTo(map)
     map.on('click', e => handleMapClickRef.current(e.latlng.lat, e.latlng.lng))
     mapRef.current = map
-    return () => { map.remove(); mapRef.current = null }
+
+    // Leaflet measures its container's pixel size the instant it's
+    // created. In a flex layout, that container can still be mid-layout
+    // (briefly zero-sized) at that exact moment — Leaflet then renders
+    // tiles for a 0x0 area and never repaints on its own once the
+    // container actually gets its real size. invalidateSize() forces it
+    // to re-measure and redraw. A ResizeObserver keeps this correct if
+    // the pane is resized later too (window resize, sidebar toggling).
+    const ro = new ResizeObserver(() => map.invalidateSize())
+    ro.observe(mapDivRef.current)
+    // Also nudge it once on the next frame, in case the observer's
+    // first callback doesn't fire before the browser's first paint.
+    requestAnimationFrame(() => map.invalidateSize())
+
+    return () => { ro.disconnect(); map.remove(); mapRef.current = null }
   }, [])
 
   // Switch basemap tile layer without tearing down the whole map.
@@ -262,7 +276,7 @@ export default function GeoReference() {
         .addTo(mapRef.current)
     })
     if (pendingLatLng) {
-      const icon = L.divIcon({ className: '', html: `<div style="width:16px;height:16px;border-radius:50%;background:#fff;border:2px dashed #888;"></div>`, iconSize: [16, 16], iconAnchor: [8, 8] })
+      const icon = L.divIcon({ className: '', html: `<div style="width:26px;height:26px;border-radius:50%;background:rgba(186,117,23,0.35);border:3px solid #BA7517;box-shadow:0 0 0 2px #fff, 0 2px 6px rgba(0,0,0,0.5);"></div>`, iconSize: [26, 26], iconAnchor: [13, 13] })
       pointMarkersRef.current.push(L.marker([pendingLatLng.lat, pendingLatLng.lng], { icon }).addTo(mapRef.current))
     }
   }, [points, pendingLatLng]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -349,6 +363,7 @@ export default function GeoReference() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'system-ui, sans-serif' }}>
+      <style>{`@keyframes geo-pending-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }`}</style>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '0.5px solid #e0dfd8', background: '#fff', flexShrink: 0 }}>
         <button onClick={() => navigate(`/survey/${id}`)} style={ghostBtn}><i className="ti ti-arrow-left" /> Back</button>
         <div style={{ width: '0.5px', height: 22, background: '#e0dfd8' }} />
@@ -400,8 +415,10 @@ export default function GeoReference() {
                   position: 'absolute', pointerEvents: 'none',
                   left: `${(pendingPixel.px / displayDims.w) * 100}%`,
                   top: `${(pendingPixel.py / displayDims.h) * 100}%`,
-                  width: 16, height: 16, marginLeft: -8, marginTop: -8,
-                  borderRadius: '50%', background: '#fff', border: '2px dashed #888',
+                  width: 26, height: 26, marginLeft: -13, marginTop: -13,
+                  borderRadius: '50%', background: 'rgba(186,117,23,0.25)',
+                  border: '3px solid #BA7517', boxShadow: '0 0 0 2px #fff, 0 2px 6px rgba(0,0,0,0.5)',
+                  animation: 'geo-pending-pulse 1.2s ease-in-out infinite',
                 }} />
               )}
               {displayDims && points.map((p, i) => (
