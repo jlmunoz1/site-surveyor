@@ -13,6 +13,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   floorPlanRotation = 0,
   iconSizes = { cameras: 16, lora: 20, network: 20, access: 16 },
   labelSizes = { cameras: 10, lora: 13, network: 10, access: 10 },
+  hiddenLabelTypes = [],
   heatmapOpacity = 0.8,
   calibrating = false,
   measuring = false,
@@ -740,6 +741,18 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
 
           {devices.map(d => (
             <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
+              onDoubleClick={e => {
+                // Renaming normally happens via double-clicking the
+                // label text itself — but if this device type's labels
+                // are hidden, there's no label to double-click, so the
+                // whole device (icon included) picks up the same
+                // rename action as a fallback.
+                if (!hiddenLabelTypes.includes(d.dtype)) return
+                e.stopPropagation()
+                if (readOnly) return
+                const newLabel = prompt('Rename device:', d.label)
+                if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
+              }}
               style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
               {(() => {
                 const sz = getSizeForDevice(d.dtype)
@@ -770,18 +783,20 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                         </div>
                       )}
                     </div>
-                    <div
-                      title="Double-click to rename"
-                      onDoubleClick={e => {
-                        e.stopPropagation()
-                        if (readOnly) return
-                        const newLabel = prompt('Rename device:', d.label)
-                        if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
-                      }}
-                      style={{ fontSize: getLabelSizeForDevice(d.dtype), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: readOnly ? 'default' : 'text' }}>
-                      {d.label}
-                      {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
-                    </div>
+                    {!hiddenLabelTypes.includes(d.dtype) && (
+                      <div
+                        title="Double-click to rename"
+                        onDoubleClick={e => {
+                          e.stopPropagation()
+                          if (readOnly) return
+                          const newLabel = prompt('Rename device:', d.label)
+                          if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
+                        }}
+                        style={{ fontSize: getLabelSizeForDevice(d.dtype), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: readOnly ? 'default' : 'text' }}>
+                        {d.label}
+                        {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
+                      </div>
+                    )}
                   </>
                 )
               })()}

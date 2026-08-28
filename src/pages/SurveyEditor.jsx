@@ -66,6 +66,11 @@ export default function SurveyEditor() {
     network: 10,
     access: 10,
   })
+  // Which specific device types (dtype, not category) currently have
+  // their labels hidden — e.g. hiding "Reolink Fisheye" labels while
+  // Dome/Bullet camera labels (same category) stay visible. Finer-
+  // grained than iconSizes/labelSizes, which only go down to category.
+  const [hiddenLabelTypes, setHiddenLabelTypes] = useState([])
   const [exportingPDF, setExportingPDF] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
@@ -140,6 +145,7 @@ export default function SurveyEditor() {
     if (data.label_sizes) {
       setLabelSizes(typeof data.label_sizes === 'object' ? data.label_sizes : {cameras:10,lora:13,network:10,access:10})
     }
+    setHiddenLabelTypes(Array.isArray(data.hidden_label_types) ? data.hidden_label_types : [])
     setLoading(false)
   }
 
@@ -474,6 +480,19 @@ export default function SurveyEditor() {
     const newRotation = (floorPlanRotation + 90) % 360
     setFloorPlanRotation(newRotation)
     await saveSurvey(id, { floor_plan_rotation: newRotation })
+  }
+
+  // Toggles whether labels are shown for one specific device type
+  // (e.g. "Reolink Fisheye") without affecting other types in the same
+  // category (Dome/Bullet cameras keep their labels). Saved
+  // immediately, same one-off pattern as rotate — this is a rare,
+  // deliberate action, not part of the debounced main-canvas autosave.
+  async function toggleLabelVisibility(dtype) {
+    const next = hiddenLabelTypes.includes(dtype)
+      ? hiddenLabelTypes.filter(t => t !== dtype)
+      : [...hiddenLabelTypes, dtype]
+    setHiddenLabelTypes(next)
+    await saveSurvey(id, { hidden_label_types: next }, { updatedBy: user?.id })
   }
 
   async function handleRenameSurvey() {
@@ -947,6 +966,18 @@ export default function SurveyEditor() {
                     {item.heatmap && (
                       <span style={{ fontSize: 9, background: '#EAF3DE', color: '#3B6D11', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #97C459', marginLeft: 'auto' }}>heat</span>
                     )}
+                    <button
+                      onClick={e => { e.stopPropagation(); toggleLabelVisibility(item.dtype) }}
+                      title={hiddenLabelTypes.includes(item.dtype) ? `${item.label} labels are hidden — click to show` : `Hide ${item.label} labels`}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+                        marginLeft: item.heatmap ? 4 : 'auto',
+                        color: hiddenLabelTypes.includes(item.dtype) ? '#BA7517' : '#bbb',
+                        display: 'flex', alignItems: 'center', flexShrink: 0,
+                      }}
+                    >
+                      <i className={`ti ti-${hiddenLabelTypes.includes(item.dtype) ? 'eye-off' : 'eye'}`} style={{ fontSize: 13 }} />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -982,6 +1013,7 @@ export default function SurveyEditor() {
           floorPlanRotation={floorPlanRotation}
           iconSizes={iconSizes}
           labelSizes={labelSizes}
+          hiddenLabelTypes={hiddenLabelTypes}
           calibrating={calibrating}
           measuring={measuring}
           onCalibrateDrag={handleCalibrateDrag}
