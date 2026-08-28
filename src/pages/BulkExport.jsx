@@ -185,7 +185,7 @@ export default function BulkExport() {
           html2canvas's layout measurement) rather than hidden, so
           each survey's floor plan and devices render exactly the way
           they would in the real editor before being captured. */}
-      <div data-bulk-export-canvas style={{ position: 'fixed', top: 0, left: -100000, width: 1400, height: 1000, background: '#fff' }}>
+      <div data-bulk-export-canvas style={{ position: 'fixed', top: 0, left: -100000, width: 1400, height: 1000, background: '#fff', display: 'flex' }}>
         {renderSurvey && (
           <SurveyCanvas
             ref={canvasRef}
