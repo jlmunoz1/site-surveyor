@@ -9,6 +9,7 @@ import {
   syncProjectToPortMapper, setProjectPortMapperSiteId,
   uploadFloorPlan, saveSurvey,
   getProjectMembers, inviteToProject, removeProjectMember, sendProjectInviteEmail,
+  getEnterprises, createEnterprise, renameEnterprise, deleteEnterprise, setProjectEnterprise,
 } from '../lib/supabase'
 import { geocodeAddress } from '../lib/geocode'
 
@@ -17,6 +18,13 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [surveys, setSurveys] = useState([])
   const [projects, setProjects] = useState([])
+  const [enterprises, setEnterprises] = useState([])
+  const [expandedEnterprises, setExpandedEnterprises] = useState({}) // default-open; only tracks explicit collapses
+  const [showNewEnterprise, setShowNewEnterprise] = useState(false)
+  const [newEnterpriseName, setNewEnterpriseName] = useState('')
+  const [creatingEnterprise, setCreatingEnterprise] = useState(false)
+  const [editingEnterpriseId, setEditingEnterpriseId] = useState(null)
+  const [enterpriseNameInput, setEnterpriseNameInput] = useState('')
   const [profiles, setProfiles] = useState({}) // id -> { email, full_name }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -66,13 +74,15 @@ export default function Dashboard() {
 
   async function loadAll() {
     setLoading(true)
-    const [{ data: survData }, { data: projData }, { data: profData }] = await Promise.all([
+    const [{ data: survData }, { data: projData }, { data: profData }, { data: entData }] = await Promise.all([
       getSurveys(),
       getProjects(),
       getProfiles(),
+      getEnterprises(),
     ])
     setSurveys(survData || [])
     setProjects(projData || [])
+    setEnterprises(entData || [])
     const pMap = {}
     ;(profData || []).forEach(p => { pMap[p.id] = p })
     setProfiles(pMap)
@@ -154,6 +164,52 @@ export default function Dashboard() {
     const { error } = await updateProjectAddress(project.id, trimmed, lat, lng)
     if (error) { setError('Could not save address: ' + error.message); return }
     setProjects(ps => ps.map(p => p.id === project.id ? { ...p, address: trimmed, address_lat: lat, address_lng: lng } : p))
+  }
+
+  async function handleCreateEnterprise(e) {
+    e.preventDefault()
+    if (!newEnterpriseName.trim()) return
+    setCreatingEnterprise(true)
+    const { data, error } = await createEnterprise(user.id, newEnterpriseName.trim())
+    setCreatingEnterprise(false)
+    if (error) { setError('Could not create enterprise: ' + error.message); return }
+    setEnterprises(es => [...es, data].sort((a, b) => a.name.localeCompare(b.name)))
+    setNewEnterpriseName(''); setShowNewEnterprise(false)
+  }
+
+  async function handleRenameEnterprise(enterprise) {
+    const trimmed = enterpriseNameInput.trim()
+    setEditingEnterpriseId(null)
+    if (!trimmed || trimmed === enterprise.name) return
+    const previousName = enterprise.name
+    setEnterprises(es => es.map(x => x.id === enterprise.id ? { ...x, name: trimmed } : x))
+    const { error } = await renameEnterprise(enterprise.id, trimmed)
+    if (error) {
+      setEnterprises(es => es.map(x => x.id === enterprise.id ? { ...x, name: previousName } : x))
+      setError('Rename failed: ' + error.message)
+    }
+  }
+
+  async function handleDeleteEnterprise(enterprise) {
+    const count = projects.filter(p => p.enterprise_id === enterprise.id).length
+    const warning = count > 0
+      ? `Delete "${enterprise.name}"? Its ${count} project${count !== 1 ? 's' : ''} will move to Unassigned, not be deleted.`
+      : `Delete "${enterprise.name}"?`
+    if (!window.confirm(warning)) return
+    const { error } = await deleteEnterprise(enterprise.id)
+    if (error) { setError('Could not delete enterprise: ' + error.message); return }
+    setEnterprises(es => es.filter(x => x.id !== enterprise.id))
+    setProjects(ps => ps.map(p => p.enterprise_id === enterprise.id ? { ...p, enterprise_id: null } : p))
+  }
+
+  async function handleMoveProjectToEnterprise(project, enterpriseId) {
+    const previous = project.enterprise_id ?? null
+    setProjects(ps => ps.map(p => p.id === project.id ? { ...p, enterprise_id: enterpriseId } : p))
+    const { error } = await setProjectEnterprise(project.id, enterpriseId)
+    if (error) {
+      setProjects(ps => ps.map(p => p.id === project.id ? { ...p, enterprise_id: previous } : p))
+      setError('Could not move project: ' + error.message)
+    }
   }
 
   function triggerFloorPlanUpload(project) {
@@ -310,6 +366,9 @@ export default function Dashboard() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a18', margin: 0 }}>Projects & Surveys</h1>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setShowNewEnterprise(true)} style={ghostBtn}>
+              <i className="ti ti-building-skyscraper" style={{ marginRight: 4 }} /> New enterprise
+            </button>
             <button onClick={() => setShowNewProject(true)} style={ghostBtn}>
               <i className="ti ti-folder-plus" style={{ marginRight: 4 }} /> New project
             </button>
@@ -332,6 +391,17 @@ export default function Dashboard() {
         {error && <p style={{ fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{error}</p>}
         {info && <p style={{ fontSize: 12, color: '#0F6E56', background: '#E1F5EE', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{info}</p>}
         <input ref={floorPlanInputRef} type="file" accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFloorPlanFileChange} />
+
+        {/* New enterprise form */}
+        {showNewEnterprise && (
+          <form onSubmit={handleCreateEnterprise} style={formCard}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#1a1a18' }}>New enterprise</span>
+            <input autoFocus value={newEnterpriseName} onChange={e => setNewEnterpriseName(e.target.value)}
+              placeholder="e.g. Sage Health" style={{ ...fieldInput, flex: 1 }} required />
+            <button type="submit" disabled={creatingEnterprise} style={primaryBtn}>{creatingEnterprise ? 'Creating…' : 'Create'}</button>
+            <button type="button" onClick={() => setShowNewEnterprise(false)} style={ghostBtn}>Cancel</button>
+          </form>
+        )}
 
         {/* New project form */}
         {showNewProject && (
@@ -369,8 +439,9 @@ export default function Dashboard() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-            {/* Projects with their surveys */}
-            {visibleProjects.map(project => {
+            {/* Projects with their surveys, grouped by Enterprise */}
+            {(() => {
+              function renderProject(project) {
               const projectSurveys = surveys.filter(s => s.project_id === project.id)
               const isOpen = expanded[project.id]
               const isMine = project.user_id === user.id
@@ -416,6 +487,20 @@ export default function Dashboard() {
                       </span>
                     )}
                     <span style={{ flex: 1 }} />
+                    {(isMine || isAdmin) && enterprises.length > 0 && (
+                      <select
+                        value={project.enterprise_id || ''}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => handleMoveProjectToEnterprise(project, e.target.value || null)}
+                        title="Move to enterprise"
+                        style={{ fontSize: 10.5, color: '#666', border: '0.5px solid #ddd', borderRadius: 5, padding: '3px 5px', background: '#fff' }}
+                      >
+                        <option value="">Unassigned</option>
+                        {enterprises.map(ent => (
+                          <option key={ent.id} value={ent.id}>{ent.name}</option>
+                        ))}
+                      </select>
+                    )}
                     <span style={{ fontSize: 11, color: '#888' }}>{projectSurveys.length} survey{projectSurveys.length !== 1 ? 's' : ''}</span>
                     <button onClick={e => { e.stopPropagation(); triggerFloorPlanUpload(project) }}
                       disabled={uploadingPlanFor === project.id}
@@ -491,7 +576,85 @@ export default function Dashboard() {
                   )}
                 </div>
               )
-            })}
+          }
+
+          // Group this tab's visible projects by enterprise — named
+          // enterprises first (alphabetical, matching the fetch order),
+          // then an "Unassigned" bucket for projects with no
+          // enterprise_id. Enterprises with zero visible projects in
+          // this tab are skipped entirely rather than shown empty,
+          // since "My Projects" vs "Team Projects" already filters by
+          // ownership underneath this grouping.
+          const enterpriseSections = enterprises
+            .map(ent => ({ enterprise: ent, projects: visibleProjects.filter(p => p.enterprise_id === ent.id) }))
+            .filter(section => section.projects.length > 0)
+          const unassignedProjects = visibleProjects.filter(p => !p.enterprise_id)
+
+          return (
+            <>
+              {enterpriseSections.map(({ enterprise, projects: entProjects }) => {
+                const isEntOpen = expandedEnterprises[enterprise.id] !== false // default open
+                const isEntMine = enterprise.user_id === user.id
+                return (
+                  <div key={enterprise.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 4px', cursor: 'pointer' }}
+                      onClick={() => setExpandedEnterprises(e => ({ ...e, [enterprise.id]: !isEntOpen }))}>
+                      <i className={`ti ti-chevron-${isEntOpen ? 'down' : 'right'}`} style={{ fontSize: 13, color: '#888' }} />
+                      <i className="ti ti-building-skyscraper" style={{ fontSize: 15, color: '#0F6E56' }} />
+                      {editingEnterpriseId === enterprise.id ? (
+                        <input
+                          autoFocus
+                          value={enterpriseNameInput}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => setEnterpriseNameInput(e.target.value)}
+                          onBlur={() => handleRenameEnterprise(enterprise)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleRenameEnterprise(enterprise)
+                            if (e.key === 'Escape') setEditingEnterpriseId(null)
+                          }}
+                          style={{ fontSize: 13, fontWeight: 600, color: '#1a1a18', background: '#fff', border: '0.5px solid #378ADD', borderRadius: 6, padding: '2px 7px', outline: 'none', width: 220 }}
+                        />
+                      ) : (
+                        <span
+                          onClick={e => {
+                            if (!isEntMine && !isAdmin) return
+                            e.stopPropagation()
+                            setEnterpriseNameInput(enterprise.name)
+                            setEditingEnterpriseId(enterprise.id)
+                          }}
+                          title={(isEntMine || isAdmin) ? 'Click to rename' : ''}
+                          style={{ fontSize: 13, fontWeight: 600, color: '#1a1a18', textTransform: 'uppercase', letterSpacing: '.03em', cursor: (isEntMine || isAdmin) ? 'text' : 'default' }}
+                        >
+                          {enterprise.name}
+                        </span>
+                      )}
+                      <span style={{ fontSize: 11, color: '#aaa' }}>{entProjects.length} project{entProjects.length !== 1 ? 's' : ''}</span>
+                      <span style={{ flex: 1 }} />
+                      {(isEntMine || isAdmin) && (
+                        <button onClick={e => { e.stopPropagation(); handleDeleteEnterprise(enterprise) }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ccc', fontSize: 13, padding: '2px 4px' }}>
+                          <i className="ti ti-trash" />
+                        </button>
+                      )}
+                    </div>
+                    {isEntOpen && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 18 }}>
+                        {entProjects.map(renderProject)}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+
+              {enterpriseSections.length > 0 && unassignedProjects.length > 0 && (
+                <div style={{ fontSize: 11, fontWeight: 500, color: '#aaa', textTransform: 'uppercase', letterSpacing: '.05em', padding: '4px 4px 0' }}>
+                  Unassigned
+                </div>
+              )}
+              {unassignedProjects.map(renderProject)}
+            </>
+          )
+        })()}
 
             {/* Unassigned surveys */}
             {visibleUnassigned.length > 0 && (

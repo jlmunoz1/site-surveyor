@@ -140,6 +140,45 @@ export async function createProject(userId, name) {
   return supabase.from('projects').insert({ user_id: userId, name }).select().single()
 }
 
+export async function getEnterprises() {
+  return supabase.from('enterprises').select('*').order('name')
+}
+
+export async function createEnterprise(userId, name) {
+  return supabase.from('enterprises').insert({ user_id: userId, name }).select().single()
+}
+
+// Same defensive zero-row check as renameProject/updateProjectAddress.
+export async function renameEnterprise(id, name) {
+  const { data, error } = await supabase.from('enterprises').update({ name }).eq('id', id).select('id')
+  if (error) return { data: null, error }
+  if (!data || data.length === 0) {
+    return { data: null, error: new Error("Rename didn't take effect — you may not have permission to edit this enterprise.") }
+  }
+  return { data, error: null }
+}
+
+// Deleting an enterprise doesn't delete its projects — the FK is
+// ON DELETE SET NULL, so they just fall back into "Unassigned."
+export async function deleteEnterprise(id) {
+  return supabase.from('enterprises').delete().eq('id', id)
+}
+
+// Assigns (or unassigns, if enterpriseId is null) a project to an
+// enterprise. Same zero-row check pattern as the other project writes.
+export async function setProjectEnterprise(projectId, enterpriseId) {
+  const { data, error } = await supabase
+    .from('projects')
+    .update({ enterprise_id: enterpriseId })
+    .eq('id', projectId)
+    .select('id')
+  if (error) return { data: null, error }
+  if (!data || data.length === 0) {
+    return { data: null, error: new Error("Couldn't move this project — you may not have permission to edit it.") }
+  }
+  return { data, error: null }
+}
+
 // Renames a project. Same defensive pattern as saveSurvey: Postgres RLS
 // silently matches zero rows on a blocked update rather than raising an
 // error, so `!error` alone isn't proof the rename actually happened —
