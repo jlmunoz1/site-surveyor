@@ -630,6 +630,10 @@ export default function Dashboard() {
                       )}
                       <span style={{ fontSize: 11, color: '#aaa' }}>{entProjects.length} project{entProjects.length !== 1 ? 's' : ''}</span>
                       <span style={{ flex: 1 }} />
+                      <button onClick={e => { e.stopPropagation(); navigate(`/enterprise/${enterprise.id}/export`) }}
+                        style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
+                        <i className="ti ti-download" style={{ marginRight: 3 }} /> Download all PDFs
+                      </button>
                       {(isEntMine || isAdmin) && (
                         <button onClick={e => { e.stopPropagation(); handleDeleteEnterprise(enterprise) }}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ccc', fontSize: 13, padding: '2px 4px' }}>

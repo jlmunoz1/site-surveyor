@@ -19,6 +19,13 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   measuring = false,
   onCalibrateDrag,
   readOnly = false,
+  // Fired once the floor plan (if any) has finished loading and been
+  // drawn — or immediately if there's no floor plan at all. Used by
+  // the bulk PDF export flow to know exactly when it's safe to
+  // screenshot this canvas, since floor plan loading (image fetch, or
+  // PDF.js page rendering) is asynchronous and would otherwise
+  // sometimes get captured mid-load as a blank canvas.
+  onFloorPlanReady,
 }, ref) {
   const wrapRef = useRef(null)
   const fpCanvasRef = useRef(null)
@@ -169,12 +176,14 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       canvas.style.height = '0px'
       loadedSourceRef.current = null
       loadedUrlRef.current = null
+      onFloorPlanReady?.()
       return
     }
 
     if (loadedUrlRef.current === `${floorPlanUrl}#${floorPlanPage}` && loadedSourceRef.current) {
       // Already loaded — just draw at the current rotation.
       drawFloorPlanAtRotation(floorPlanRotation)
+      onFloorPlanReady?.()
       return
     }
 
@@ -213,6 +222,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
           loadedSourceRef.current = { kind: 'pdf', canvas: raw, displayScale }
           loadedUrlRef.current = `${floorPlanUrl}#${floorPlanPage}`
           drawFloorPlanAtRotation(floorPlanRotation)
+          onFloorPlanReady?.()
         } catch (err) { console.error('PDF render error:', err) }
       }
       loadPDF()
@@ -223,6 +233,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         loadedSourceRef.current = { kind: 'image', img: image }
         loadedUrlRef.current = `${floorPlanUrl}#${floorPlanPage}`
         drawFloorPlanAtRotation(floorPlanRotation)
+        onFloorPlanReady?.()
       }
       img.onload = () => onReady(img)
       img.onerror = () => {

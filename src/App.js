@@ -4,6 +4,7 @@ import AuthPage from './pages/AuthPage'
 import Dashboard from './pages/Dashboard'
 import SurveyEditor from './pages/SurveyEditor'
 import GeoReference from './pages/GeoReference'
+import BulkExport from './pages/BulkExport'
 import AdminPage from './pages/AdminPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import AccessExpiredPage from './pages/AccessExpiredPage'
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/survey/:id" element={<ProtectedRoute><SurveyEditor /></ProtectedRoute>} />
           <Route path="/survey/:id/georeference" element={<ProtectedRoute><GeoReference /></ProtectedRoute>} />
+          <Route path="/enterprise/:id/export" element={<ProtectedRoute><BulkExport /></ProtectedRoute>} />
           <Route path="/shared/:token" element={<SurveyEditor />} />
           <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
           <Route path="/reset-password" element={<ProtectedRoute><ResetPasswordPage /></ProtectedRoute>} />

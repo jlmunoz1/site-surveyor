@@ -6,6 +6,7 @@ import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES, COLOR_PALETTE } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfPageCount } from '../lib/pdf'
+import { buildSurveyPdfBlob, downloadBlob, safeFileName } from '../lib/exportPdf'
 
 // Sage Port Mapper's stable production URL.
 const NETWORK_MAPPER_URL = 'https://sage-port-mapper.vercel.app'
@@ -88,7 +89,7 @@ export default function SurveyEditor() {
 
   const [mode, setMode] = useState('select')
   const [activeCableType, setActiveCableType] = useState('cat6')
-  const [showHeatmap, setShowHeatmap] = useState(true)
+  const [showHeatmap, setShowHeatmap] = useState(false)
   const [heatmapOpacity, setHeatmapOpacity] = useState(0.8)
   const [selectedId, setSelectedId] = useState(null)
   const [showNetworkMapper, setShowNetworkMapper] = useState(false)
@@ -569,96 +570,11 @@ export default function SurveyEditor() {
   async function handleExportPDF() {
     setExportingPDF(true)
     try {
-      const jsPDFScript = document.createElement('script')
-      jsPDFScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
-      await new Promise((res, rej) => { jsPDFScript.onload = res; jsPDFScript.onerror = rej; document.head.appendChild(jsPDFScript) })
-      const html2canvasScript = document.createElement('script')
-      html2canvasScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
-      await new Promise((res, rej) => { html2canvasScript.onload = res; html2canvasScript.onerror = rej; document.head.appendChild(html2canvasScript) })
       const canvasEl = document.querySelector('[data-export-canvas]')
       if (!canvasEl) { alert('Could not find canvas to export.'); setExportingPDF(false); return }
-
-      // Crop the capture to just the floor plan's own bounding box
-      // (plus a small padding buffer) instead of the whole viewport,
-      // which usually has a lot of empty space around a centered floor
-      // plan whose aspect ratio doesn't match the browser window.
-      const bounds = canvasRef.current?.getFloorPlanBounds?.()
-      const PAD = 24
-      const captureOpts = { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' }
-      if (bounds) {
-        const elRect = canvasEl.getBoundingClientRect()
-        captureOpts.x = Math.max(0, Math.floor(bounds.left - PAD))
-        captureOpts.y = Math.max(0, Math.floor(bounds.top - PAD))
-        captureOpts.width = Math.min(elRect.width - captureOpts.x, Math.ceil(bounds.width + PAD * 2))
-        captureOpts.height = Math.min(elRect.height - captureOpts.y, Math.ceil(bounds.height + PAD * 2))
-      }
-
-      const rendered = await window.html2canvas(canvasEl, captureOpts)
-      const imgData = rendered.toDataURL('image/png')
-      const { jsPDF } = window.jspdf
-      const pdf = new jsPDF({ orientation: rendered.width > rendered.height ? 'landscape' : 'portrait', unit: 'px', format: [rendered.width / 2, rendered.height / 2] })
-      pdf.addImage(imgData, 'PNG', 0, 0, rendered.width / 2, rendered.height / 2)
-
-      // Network equipment key — one entry per MDF/IDF/switch on this
-      // floor, listing whatever equipment is inside its rack in Port
-      // Mapper (live, at export time).
-      const rackDevices = devices.filter(d => NETWORK_MAPPER_DTYPES.includes(d.dtype))
-      if (rackDevices.length > 0) {
-        const results = await Promise.all(
-          rackDevices.map(async d => {
-            if (!d.portMapperRackId) return { device: d, devices: null, error: null }
-            const r = await getPortMapperRackDevices(d.portMapperRackId)
-            return { device: d, devices: r.devices, error: r.error }
-          })
-        )
-
-        // ~100dpi "letter" page, consistent with px-unit doc set above.
-        pdf.addPage([850, 1100], 'portrait')
-        const pageH = 1100
-        const margin = 40
-        let y = margin
-
-        pdf.setTextColor(0, 0, 0)
-        pdf.setFontSize(16); pdf.setFont('helvetica', 'bold')
-        pdf.text('Network Equipment Key', margin, y)
-        y += 30
-
-        results.forEach(({ device, devices: equipment, error }) => {
-          if (y > pageH - 60) { pdf.addPage([850, 1100], 'portrait'); y = margin }
-          pdf.setFontSize(12); pdf.setFont('helvetica', 'bold')
-          const rackName = device.rackId || device.label
-          const heading = device.rackId && device.rackId !== device.label ? `${rackName} (${device.label})` : rackName
-          pdf.text(heading, margin, y)
-          y += 18
-          pdf.setFontSize(10); pdf.setFont('helvetica', 'normal')
-          if (!device.portMapperRackId) {
-            pdf.setTextColor(140, 140, 140)
-            pdf.text('Not yet linked to Network Mapper.', margin + 14, y)
-            pdf.setTextColor(0, 0, 0)
-            y += 16
-          } else if (error) {
-            pdf.setTextColor(160, 45, 45)
-            pdf.text(`Couldn't load equipment: ${error}`, margin + 14, y)
-            pdf.setTextColor(0, 0, 0)
-            y += 16
-          } else if (!equipment || equipment.length === 0) {
-            pdf.setTextColor(140, 140, 140)
-            pdf.text('No equipment added in Network Mapper yet.', margin + 14, y)
-            pdf.setTextColor(0, 0, 0)
-            y += 16
-          } else {
-            equipment.forEach(eq => {
-              if (y > pageH - 40) { pdf.addPage([850, 1100], 'portrait'); y = margin }
-              const line = eq.ports ? `•  ${eq.label}  (${eq.ports}p)` : `•  ${eq.label}`
-              pdf.text(line, margin + 14, y)
-              y += 16
-            })
-          }
-          y += 14
-        })
-      }
-
-      pdf.save(`${survey?.name || 'survey'}.pdf`)
+      const canvasBounds = canvasRef.current?.getFloorPlanBounds?.()
+      const blob = await buildSurveyPdfBlob({ canvasEl, canvasBounds, survey, devices })
+      downloadBlob(blob, `${safeFileName(survey?.name || 'survey')}.pdf`)
     } catch (err) { alert('Export failed: ' + err.message) }
     setExportingPDF(false)
   }

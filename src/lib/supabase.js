@@ -144,6 +144,10 @@ export async function getEnterprises() {
   return supabase.from('enterprises').select('*').order('name')
 }
 
+export async function getEnterprise(id) {
+  return supabase.from('enterprises').select('*').eq('id', id).single()
+}
+
 export async function createEnterprise(userId, name) {
   return supabase.from('enterprises').insert({ user_id: userId, name }).select().single()
 }
