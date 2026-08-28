@@ -42,10 +42,25 @@ export async function buildSurveyPdfBlob({ canvasEl, canvasBounds, survey, devic
     captureOpts.y = Math.max(0, Math.floor(canvasBounds.top - PAD))
     captureOpts.width = Math.min(elRect.width - captureOpts.x, Math.ceil(canvasBounds.width + PAD * 2))
     captureOpts.height = Math.min(elRect.height - captureOpts.y, Math.ceil(canvasBounds.height + PAD * 2))
+    // A crop region that comes out zero/negative (e.g. from pan/zoom
+    // values computed against an unusual container size) would
+    // otherwise silently produce an empty capture and a cryptic
+    // "Incomplete or corrupt PNG file" error much later, in jsPDF —
+    // fall back to capturing the whole element uncropped instead of
+    // feeding it a broken crop rectangle.
+    if (captureOpts.width <= 0 || captureOpts.height <= 0) {
+      delete captureOpts.x; delete captureOpts.y; delete captureOpts.width; delete captureOpts.height
+    }
   }
 
   const rendered = await window.html2canvas(canvasEl, captureOpts)
+  if (!rendered || rendered.width === 0 || rendered.height === 0) {
+    throw new Error('Captured canvas was empty (0×0) — the floor plan likely had not finished rendering yet.')
+  }
   const imgData = rendered.toDataURL('image/png')
+  if (!imgData || imgData === 'data:,' || imgData.length < 100) {
+    throw new Error('Captured image came out empty — likely a cross-origin floor plan image blocking pixel access.')
+  }
   const { jsPDF } = window.jspdf
   const pdf = new jsPDF({ orientation: rendered.width > rendered.height ? 'landscape' : 'portrait', unit: 'px', format: [rendered.width / 2, rendered.height / 2] })
   pdf.addImage(imgData, 'PNG', 0, 0, rendered.width / 2, rendered.height / 2)

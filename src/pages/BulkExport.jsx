@@ -71,8 +71,14 @@ export default function BulkExport() {
 
         const canvasEl = document.querySelector('[data-bulk-export-canvas] [data-export-canvas]')
         if (!canvasEl) throw new Error('Canvas did not render')
-        const canvasBounds = canvasRef.current?.getFloorPlanBounds?.()
-        const blob = await buildSurveyPdfBlob({ canvasEl, canvasBounds, survey, devices: survey.devices || [] })
+        // Deliberately not using getFloorPlanBounds() here — cropping
+        // to that requires pan/zoom values that were computed against
+        // this off-screen container's specific size, which behaves
+        // differently than the normal full-window editor and produced
+        // empty/broken captures. Capturing the whole canvas uncropped
+        // means a bit more surrounding whitespace in the PDF, but
+        // reliably captures the actual floor plan.
+        const blob = await buildSurveyPdfBlob({ canvasEl, canvasBounds: null, survey, devices: survey.devices || [] })
 
         const folder = safeFileName(projectName)
         const fileName = safeFileName(survey.name) + '.pdf'
