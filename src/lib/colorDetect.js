@@ -90,10 +90,52 @@ function findBlobs(imageData, width, height, target, tolerance, minPixels) {
         if (cy + 1 < height) { const n = (cy + 1) * width + cx; if (matches[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy + 1; sp++ } }
         if (cy - 1 >= 0) { const n = (cy - 1) * width + cx; if (matches[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy - 1; sp++ } }
       }
-      if (count >= minPixels) blobs.push({ x: sumX / count, y: sumY / count, pixelCount: count, width: maxX - minX, height: maxY - minY })
+      if (count >= minPixels) blobs.push({ x: sumX / count, y: sumY / count, pixelCount: count, minX, maxX, minY, maxY })
     }
   }
   return blobs
+}
+
+// A single physical marker on the source floor plan often isn't one
+// clean connected blob of the marker color — a black "P" dot, a gray
+// rack rectangle, or "GW 74" text drawn on top of it can slice the
+// purple pixels into several disconnected fragments. Left unmerged,
+// each fragment clears the pixel-count threshold on its own and turns
+// one marker into a cluster of duplicate devices. This groups any
+// fragments whose centers are close together (closer than a fraction
+// of a typical marker's own size) back into a single marker, using a
+// pixel-count-weighted centroid and the union of their bounding boxes
+// so the eventual cover patch still fits the whole original marker.
+function mergeNearbyFragments(blobs, mergeDistance) {
+  const n = blobs.length
+  const parent = Array.from({ length: n }, (_, i) => i)
+  function find(x) { while (parent[x] !== x) x = parent[x]; return x }
+  function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const dx = blobs[i].x - blobs[j].x
+      const dy = blobs[i].y - blobs[j].y
+      if (Math.sqrt(dx * dx + dy * dy) <= mergeDistance) union(i, j)
+    }
+  }
+  const groups = new Map()
+  for (let i = 0; i < n; i++) {
+    const root = find(i)
+    if (!groups.has(root)) groups.set(root, [])
+    groups.get(root).push(blobs[i])
+  }
+  return Array.from(groups.values()).map(group => {
+    let sumX = 0, sumY = 0, totalWeight = 0
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const b of group) {
+      sumX += b.x * b.pixelCount
+      sumY += b.y * b.pixelCount
+      totalWeight += b.pixelCount
+      minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX)
+      minY = Math.min(minY, b.minY); maxY = Math.max(maxY, b.maxY)
+    }
+    return { x: sumX / totalWeight, y: sumY / totalWeight, pixelCount: totalWeight, width: maxX - minX, height: maxY - minY }
+  })
 }
 
 // Returns { markers: [{x,y}], error } with x/y already converted into
@@ -102,7 +144,17 @@ function findBlobs(imageData, width, height, target, tolerance, minPixels) {
 export async function detectMarkersByColor(floorPlanUrl, floorPlanPage, opts = {}) {
   const target = opts.color || DEFAULT_MARKER_COLOR
   const tolerance = opts.tolerance ?? DEFAULT_TOLERANCE
-  const minPixels = opts.minPixels ?? DEFAULT_MIN_PIXELS
+  // Kept low here on purpose — a genuine marker fragment (see
+  // mergeNearbyFragments above) can be quite small on its own, so
+  // filtering noise happens after merging, on the combined size, not
+  // per-fragment here.
+  const minPixels = opts.minPixels ?? 4
+  // Marker diameter was ~76px in the real export this was tuned
+  // against, so fragments of the same marker are well within this;
+  // distinct markers on real floor plans are spaced far wider than
+  // this in practice.
+  const mergeDistance = opts.mergeDistance ?? 55
+  const minMergedPixels = opts.minMergedPixels ?? DEFAULT_MIN_PIXELS
 
   let rendered
   try {
@@ -119,10 +171,11 @@ export async function detectMarkersByColor(floorPlanUrl, floorPlanPage, opts = {
     return { markers: [], error: 'Could not read floor plan pixels (cross-origin image) — try re-uploading it.' }
   }
 
-  const blobs = findBlobs(imageData, canvas.width, canvas.height, target, tolerance, minPixels)
+  const rawBlobs = findBlobs(imageData, canvas.width, canvas.height, target, tolerance, minPixels)
+  const merged = mergeNearbyFragments(rawBlobs, mergeDistance).filter(b => b.pixelCount >= minMergedPixels)
   const scaleX = pointWidth / canvas.width
   const scaleY = pointHeight / canvas.height
-  const markers = blobs.map(b => ({
+  const markers = merged.map(b => ({
     x: b.x * scaleX,
     y: b.y * scaleY,
     width: b.width * scaleX,
