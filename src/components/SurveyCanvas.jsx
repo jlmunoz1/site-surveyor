@@ -773,8 +773,15 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
             // self-heals on the next load instead of staying invisible
             // until re-detected.
             const iconFallback = getSizeForDevice(d.dtype) * 2
-            const maskW = Math.max(d.maskW || iconFallback, iconFallback * 0.6)
-            const maskH = Math.max(d.maskH || iconFallback, iconFallback * 0.6)
+            // Bounded BOTH directions, entirely relative to the icon's
+            // own render size — not an absolute unit value. Absolute
+            // caps (e.g. "150 units") kept breaking because a given
+            // number of "points" means a wildly different real-world
+            // size depending on each PDF's own page dimensions; tying
+            // this purely to a value we already know renders correctly
+            // (the icon size) sidesteps that entirely, on every PDF.
+            const maskW = Math.min(Math.max(d.maskW || iconFallback, iconFallback * 0.6), iconFallback * 1.5)
+            const maskH = Math.min(Math.max(d.maskH || iconFallback, iconFallback * 0.6), iconFallback * 1.5)
             return (
               <div key={'mask-' + d.id} style={{
                 position: 'absolute',
