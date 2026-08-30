@@ -19,7 +19,7 @@ export default function Dashboard() {
   const [surveys, setSurveys] = useState([])
   const [projects, setProjects] = useState([])
   const [enterprises, setEnterprises] = useState([])
-  const [expandedEnterprises, setExpandedEnterprises] = useState({}) // default-open; only tracks explicit collapses
+  const [expandedEnterprises, setExpandedEnterprises] = useState({}) // default-collapsed; only tracks explicit expansions
   const [showNewEnterprise, setShowNewEnterprise] = useState(false)
   const [newEnterpriseName, setNewEnterpriseName] = useState('')
   const [creatingEnterprise, setCreatingEnterprise] = useState(false)
@@ -669,7 +669,7 @@ export default function Dashboard() {
           return (
             <>
               {enterpriseSections.map(({ enterprise, projects: entProjects }) => {
-                const isEntOpen = expandedEnterprises[enterprise.id] !== false // default open
+                const isEntOpen = expandedEnterprises[enterprise.id] === true // default collapsed
                 const isEntMine = enterprise.user_id === user.id
                 return (
                   <div key={enterprise.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
