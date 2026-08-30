@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { getProfiles, getSurveys, getProjects, getEnterprises, renameEnterprise, deleteEnterprise, mergeEnterprises, setUserAdmin, setUserAccessExpiration, sendPasswordReset, signOut } from '../lib/supabase'
+import { getProfiles, getSurveys, getProjects, getEnterprises, renameEnterprise, deleteEnterprise, mergeEnterprises, setUserAdmin, setUserContractor, setUserAccessExpiration, sendPasswordReset, signOut } from '../lib/supabase'
 
 export default function AdminPage() {
   const { user } = useAuth()
@@ -71,6 +71,15 @@ export default function AdminPage() {
     const { error } = await setUserAdmin(u.id, !u.is_admin)
     if (error) setError(error.message)
     else setUsers(list => list.map(x => x.id === u.id ? { ...x, is_admin: !x.is_admin } : x))
+    setBusyId(null)
+  }
+
+  async function toggleContractor(u) {
+    if (u.id === user.id) return
+    setBusyId(u.id)
+    const { error } = await setUserContractor(u.id, !u.is_contractor)
+    if (error) setError(error.message)
+    else setUsers(list => list.map(x => x.id === u.id ? { ...x, is_contractor: !x.is_contractor } : x))
     setBusyId(null)
   }
 
@@ -174,13 +183,14 @@ export default function AdminPage() {
           <div style={{ textAlign: 'center', padding: 48, color: '#888', fontSize: 13 }}>Loading…</div>
         ) : (
           <div style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 130px 130px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
               <span>Name</span>
               <span>Email</span>
               <span>Joined</span>
               <span>Surveys</span>
               <span>Projects</span>
               <span>Role</span>
+              <span>Scope</span>
               <span>Access</span>
               <span>Password</span>
             </div>
@@ -192,7 +202,7 @@ export default function AdminPage() {
               const exp = u.access_expires_at ? new Date(u.access_expires_at) : null
               const isExpired = exp && exp <= new Date()
               return (
-                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 130px 130px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
                   <span style={{ color: '#1a1a18', fontWeight: 500 }}>
                     {u.full_name || '—'}{u.id === user.id && <span style={{ color: '#888', fontWeight: 400 }}> (you)</span>}
                   </span>
@@ -215,6 +225,20 @@ export default function AdminPage() {
                     title={u.id === user.id ? "You can't change your own role here" : ''}
                   >
                     {u.is_admin ? 'Admin' : 'Make admin'}
+                  </button>
+                  <button
+                    onClick={() => toggleContractor(u)}
+                    disabled={u.id === user.id || busyId === u.id}
+                    title={u.id === user.id ? "You can't change your own scope here" : u.is_contractor ? 'Sees only projects they own or were invited to' : 'Sees every project in the org'}
+                    style={{
+                      padding: '5px 10px', fontSize: 11, fontWeight: 500, borderRadius: 6, cursor: u.id === user.id ? 'default' : 'pointer',
+                      border: u.is_contractor ? '0.5px solid #F0D488' : '0.5px solid #ccc',
+                      background: u.is_contractor ? '#FFF7E6' : '#fff',
+                      color: u.is_contractor ? '#BA7517' : '#666',
+                      opacity: u.id === user.id ? 0.5 : 1,
+                    }}
+                  >
+                    {u.is_contractor ? 'Scoped' : 'Full org'}
                   </button>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <span style={{ fontSize: 10.5, color: isExpired ? '#A32D2D' : exp ? '#B36B00' : '#888' }}>

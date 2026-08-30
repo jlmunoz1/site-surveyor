@@ -360,6 +360,17 @@ export async function setUserAdmin(id, isAdmin) {
   return supabase.from('profiles').update({ is_admin: isAdmin }).eq('id', id)
 }
 
+// Controls whether a user gets org-wide "staff" visibility or is
+// scoped down to only projects they own or were invited to — separate
+// from access_expires_at, which controls whether their access works AT
+// ALL rather than how much of the org it covers. New accounts that
+// sign up in response to a project invite are auto-flagged as a
+// contractor (see handle_new_user in supabase-contractor-scope-migration.sql);
+// this lets an admin override that either direction.
+export async function setUserContractor(id, isContractor) {
+  return supabase.from('profiles').update({ is_contractor: isContractor }).eq('id', id)
+}
+
 export async function setUserAccessExpiration(id, expiresAt) {
   return supabase.from('profiles').update({ access_expires_at: expiresAt }).eq('id', id)
 }
