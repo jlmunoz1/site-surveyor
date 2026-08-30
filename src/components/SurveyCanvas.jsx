@@ -755,19 +755,29 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               underneath the new editable device icon. Purely a visual
               overlay in this same pan/zoom layer; the underlying floor
               plan image itself is never modified, so this disappears
-              automatically if the device it belongs to gets deleted. */}
-          {devices.filter(d => d.maskW && d.maskH).map(d => (
-            <div key={'mask-' + d.id} style={{
-              position: 'absolute',
-              left: d.x + 19 - d.maskW / 2,
-              top: d.y + 19 - d.maskH / 2,
-              width: d.maskW, height: d.maskH,
-              borderRadius: Math.min(d.maskW, d.maskH) / 2,
-              background: '#fdfdfb',
-              boxShadow: '0 0 4px 2px #fdfdfbdd',
-              pointerEvents: 'none',
-            }} />
-          ))}
+              automatically if the device it belongs to gets deleted.
+              Sized directly off the icon's own render size (a value we
+              already know looks right at any zoom/PDF) rather than the
+              detected blob's measured pixels converted through the
+              PDF's own point-scale — that math could produce a patch
+              far bigger than intended depending on a given PDF's real
+              point dimensions, which is what caused this to blanket
+              large areas of some floor plans. */}
+          {devices.filter(d => d.mask).map(d => {
+            const maskSz = getSizeForDevice(d.dtype) * 2
+            return (
+              <div key={'mask-' + d.id} style={{
+                position: 'absolute',
+                left: d.x + 19 - maskSz / 2,
+                top: d.y + 19 - maskSz / 2,
+                width: maskSz, height: maskSz,
+                borderRadius: maskSz / 2,
+                background: '#fdfdfb',
+                boxShadow: '0 0 3px 1px #fdfdfbdd',
+                pointerEvents: 'none',
+              }} />
+            )
+          })}
 
           {devices.map(d => (
             <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
