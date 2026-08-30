@@ -168,6 +168,23 @@ export async function deleteEnterprise(id) {
   return supabase.from('enterprises').delete().eq('id', id)
 }
 
+// Folds a duplicate enterprise into another: every project currently
+// filed under `fromId` gets reassigned to `toId`, then the now-empty
+// `fromId` enterprise is deleted. Used by the admin "merge duplicates"
+// flow — reassignment happens first and is checked before the delete
+// is attempted, so a partial failure never silently loses projects.
+export async function mergeEnterprises(fromId, toId) {
+  if (fromId === toId) return { error: new Error('Cannot merge an enterprise into itself') }
+  const { error: reassignError } = await supabase
+    .from('projects')
+    .update({ enterprise_id: toId })
+    .eq('enterprise_id', fromId)
+  if (reassignError) return { error: reassignError }
+  const { error: deleteError } = await supabase.from('enterprises').delete().eq('id', fromId)
+  if (deleteError) return { error: deleteError }
+  return { error: null }
+}
+
 // Assigns (or unassigns, if enterpriseId is null) a project to an
 // enterprise. Same zero-row check pattern as the other project writes.
 export async function setProjectEnterprise(projectId, enterpriseId) {
