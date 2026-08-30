@@ -350,6 +350,24 @@ export async function getMyProfile(userId) {
   return supabase.from('profiles').select('*').eq('id', userId).single()
 }
 
+// Self-heal fallback for a missing profiles row — see api/ensure-profile.js
+// for why this exists. Only ever called after getMyProfile() comes back
+// empty for the currently logged-in user.
+export async function ensureMyProfile(accessToken) {
+  try {
+    const res = await fetch('/api/ensure-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken }),
+    })
+    const data = await res.json()
+    if (!res.ok) return { created: false, error: data.error || 'Failed to ensure profile' }
+    return { created: data.created, error: null }
+  } catch (err) {
+    return { created: false, error: err.message || 'Failed to reach profile service' }
+  }
+}
+
 // Used to attribute a conflicting save to a name in the "someone else
 // changed this" banner (survey.updated_by -> profiles.id).
 export async function getProfileById(id) {
