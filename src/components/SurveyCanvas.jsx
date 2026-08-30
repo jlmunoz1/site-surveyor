@@ -779,14 +779,21 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                       width: sz, height: sz, borderRadius: Math.round(sz * 0.25), display: 'flex', alignItems: 'center', justifyContent: 'center',
                       background: sz > 8 ? d.color + '15' : 'transparent',
                       opacity: isRemoved ? 0.45 : 1,
-                      border: selectedId === d.id
-                        ? `${borderWidth}px solid ${d.color}`
-                        : `${borderWidth}px ${isProposed ? 'dashed' : 'solid'} ${isProposed ? statusInfo.color + '99' : 'transparent'}`,
-                      boxShadow: selectedId === d.id ? `0 0 0 2px ${d.color}33` : 'none'
+                      border: d.unconfirmed
+                        ? `${Math.max(borderWidth, 2)}px dashed #BA7517`
+                        : selectedId === d.id
+                          ? `${borderWidth}px solid ${d.color}`
+                          : `${borderWidth}px ${isProposed ? 'dashed' : 'solid'} ${isProposed ? statusInfo.color + '99' : 'transparent'}`,
+                      boxShadow: d.unconfirmed ? '0 0 0 3px #F0D48866' : (selectedId === d.id ? `0 0 0 2px ${d.color}33` : 'none')
                     }}>
                       <svg width={sz} height={sz} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
                       {isRemoved && (
                         <div style={{ position: 'absolute', left: '10%', top: '48%', width: '80%', height: Math.max(1, Math.round(sz * 0.06)), background: statusInfo.color, transform: 'rotate(-15deg)' }} />
+                      )}
+                      {d.unconfirmed && (
+                        <div title="Detected automatically — needs review" style={{ position: 'absolute', top: -3, left: -3, width: Math.max(10, Math.round(sz * 0.35)), height: Math.max(10, Math.round(sz * 0.35)), borderRadius: '50%', background: '#BA7517', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <i className="ti ti-scan" style={{ fontSize: Math.max(6, Math.round(sz * 0.2)), color: '#fff' }} />
+                        </div>
                       )}
                       {d.photoUrl && sz >= 12 && (
                         <div style={{ position: 'absolute', top: -3, right: -3, width: Math.max(10, Math.round(sz * 0.35)), height: Math.max(10, Math.round(sz * 0.35)), borderRadius: '50%', background: '#378ADD', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

@@ -5,19 +5,23 @@ import { useAuth } from '../hooks/useAuth'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES, COLOR_PALETTE } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
-import { getPdfPageCount } from '../lib/pdf'
+import { getPdfPageCount, isPdfUrl } from '../lib/pdf'
+import { detectDevicesFromPdf } from '../lib/deviceDetection'
 import { buildSurveyPdfBlob, downloadBlob, safeFileName } from '../lib/exportPdf'
 
 // Sage Port Mapper's stable production URL.
 const NETWORK_MAPPER_URL = 'https://sage-port-mapper.vercel.app'
 const NETWORK_MAPPER_DTYPES = ['mdf', 'idf', 'switch']
 
-function getDefaultDeviceColor(dtype) {
+function getDeviceDef(dtype) {
   for (const section of DEVICE_DEFS) {
     const item = section.items.find(i => i.dtype === dtype)
-    if (item) return item.color
+    if (item) return item
   }
   return null
+}
+function getDefaultDeviceColor(dtype) {
+  return getDeviceDef(dtype)?.color || null
 }
 
 function networkMapperUrl(device) {
@@ -55,6 +59,13 @@ export default function SurveyEditor() {
   const [floorPlanUrl, setFloorPlanUrl] = useState('')
   const [floorPlanPage, setFloorPlanPage] = useState(1)
   const [floorPlanRotation, setFloorPlanRotation] = useState(0)
+
+  // AI device detection — scans an imported PDF floor plan for markers
+  // that are already drawn on it (e.g. a System Surveyor export) and
+  // adds them as real, editable devices flagged `unconfirmed: true`
+  // until the person reviews and confirms each one below.
+  const [detecting, setDetecting] = useState(false)
+  const [detectError, setDetectError] = useState('')
   const [iconSizes, setIconSizes] = useState({
     cameras: 16,
     lora: 20,
@@ -322,6 +333,66 @@ export default function SurveyEditor() {
       })
     }
   }
+  const unconfirmedDevices = devices.filter(d => d.unconfirmed)
+  const isPdfFloorPlan = isPdfUrl(floorPlanUrl)
+
+  async function handleDetectDevices(urlOverride, pageOverride) {
+    const url = urlOverride || floorPlanUrl
+    const page = pageOverride || floorPlanPage
+    if (!url) return
+    setDetecting(true); setDetectError('')
+    const { markers, error } = await detectDevicesFromPdf(url, page)
+    setDetecting(false)
+    if (error) { setDetectError(error); return }
+    if (!markers.length) {
+      setSaveMsg('No existing device markers detected on this page')
+      setTimeout(() => setSaveMsg(''), 3500)
+      return
+    }
+    const newDevices = markers.map(m => {
+      const def = getDeviceDef(m.dtype) || getDeviceDef('sage-equip')
+      return {
+        id: uuidv4(),
+        dtype: m.dtype, label: m.label || '', color: def?.color || '#888780',
+        coverage: def?.coverage || 0, heatmap: def?.heatmap || false,
+        x: m.x - 19, y: m.y - 19,
+        model: '', ip: '', notes: '', cost: 0, qty: 1, status: 'existing', photoUrl: '',
+        hmRangeFt: 120, hmStrength: 0.75,
+        unconfirmed: true,
+      }
+    })
+    updateDevices([...devices, ...newDevices])
+    setSaveMsg(`Detected ${newDevices.length} device${newDevices.length === 1 ? '' : 's'} — review the highlighted markers below`)
+    setTimeout(() => setSaveMsg(''), 5000)
+  }
+  function confirmDetectedDevice(devId) {
+    patchDeviceById(devId, { unconfirmed: false })
+    const d = devices.find(x => x.id === devId)
+    if (d && NETWORK_MAPPER_DTYPES.includes(d.dtype) && portMapperSiteId && !d.portMapperRackId) {
+      createPortMapperRack(portMapperSiteId, d.rackId || d.label).then(({ rack, error }) => {
+        if (error) { console.warn('Port Mapper rack sync failed:', error); return }
+        if (rack?.id) patchDeviceById(devId, { portMapperRackId: rack.id })
+      })
+    }
+  }
+  function confirmAllDetectedDevices() {
+    unconfirmedDevices.forEach(d => confirmDetectedDevice(d.id))
+  }
+  function discardDetectedDevice(devId) {
+    updateDevices(devices.filter(d => d.id !== devId))
+    if (selectedId === devId) setSelectedId(null)
+  }
+  function discardAllDetectedDevices() {
+    updateDevices(devices.filter(d => !d.unconfirmed))
+  }
+  function retypeDetectedDevice(devId, newDtype) {
+    const def = getDeviceDef(newDtype)
+    patchDeviceById(devId, { dtype: newDtype, color: def?.color || '#888780', coverage: def?.coverage || 0, heatmap: def?.heatmap || false })
+  }
+  function relabelDetectedDevice(devId, newLabel) {
+    patchDeviceById(devId, { label: newLabel })
+  }
+
   function duplicateSelectedDevice() {
     if (!selectedDevice) return
     const copy = { ...selectedDevice, id: uuidv4(), x: selectedDevice.x + 24, y: selectedDevice.y + 24 }
@@ -465,6 +536,15 @@ export default function SurveyEditor() {
     await saveSurvey(id, { floor_plan_url: url, floor_plan_page: 1 })
     setSaving(false); setSaveMsg('Floor plan uploaded'); setTimeout(() => setSaveMsg(''), 2500)
     e.target.value = ''
+
+    // If it's a PDF (e.g. a System Surveyor export), offer to scan it
+    // right away for markers already drawn on the plan — these come
+    // in as flattened pixels with no metadata, so detection is the only
+    // way to recover them as editable devices instead of re-placing
+    // everything by hand.
+    if (isPDF && window.confirm('Scan this PDF for existing device markers (gateways, IDF/MDF, etc.) and add them as editable devices you can review?')) {
+      handleDetectDevices(url, 1)
+    }
   }
 
   async function handleDeleteFloorPlan() {
@@ -656,6 +736,12 @@ export default function SurveyEditor() {
                 <button style={{ ...tbBtn, color: '#1D9E75', borderColor: '#9AD9BE' }} onClick={() => navigate(`/survey/${id}/georeference`)} title="Overlay this floor plan on satellite imagery">
                   <i className="ti ti-map-pin" /> Georeference
                 </button>
+                {isPdfFloorPlan && (
+                  <button style={{ ...tbBtn, color: '#BA7517', borderColor: '#F0D488' }} onClick={() => handleDetectDevices()} disabled={detecting}
+                    title="Scan this PDF page for device markers already drawn on it (e.g. a System Surveyor export) and add them as editable devices">
+                    <i className={`ti ti-${detecting ? 'loader-2' : 'scan'}`} /> {detecting ? 'Detecting…' : 'Detect Devices'}
+                  </button>
+                )}
               </>
             )}
             <input ref={fileInputRef} type="file" accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFloorPlanUpload} />
@@ -830,6 +916,20 @@ export default function SurveyEditor() {
           </span>
           <button onClick={handleSaveNow} style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }}>
             <i className="ti ti-refresh" /> Retry save
+          </button>
+        </div>
+      )}
+
+      {detectError && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '8px 14px', background: '#FDECEC', borderBottom: '0.5px solid #F0AFAF',
+          fontSize: 12.5, color: '#7A1F1F', flexShrink: 0,
+        }}>
+          <i className="ti ti-alert-circle" style={{ color: '#A32D2D', fontSize: 15 }} />
+          <span style={{ flex: '1 1 320px' }}><strong>Device detection failed:</strong> {detectError}</span>
+          <button onClick={() => setDetectError('')} style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }}>
+            <i className="ti ti-x" /> Dismiss
           </button>
         </div>
       )}
@@ -1380,6 +1480,58 @@ export default function SurveyEditor() {
             <div style={{ padding: '6px 16px', fontSize: 10.5, color: '#aaa', borderTop: '0.5px solid #f0efea' }}>
               If this doesn't load, the other app may block embedding — use "Open in new tab" instead.
             </div>
+          </div>
+        </div>
+      )}
+
+      {unconfirmedDevices.length > 0 && (
+        <div style={{
+          position: 'fixed', right: 190, bottom: 16, width: 300, maxHeight: 380,
+          background: '#fff', border: '0.5px solid #F0D488', borderRadius: 10,
+          boxShadow: '0 4px 18px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column',
+          zIndex: 40, overflow: 'hidden',
+        }}>
+          <div style={{ padding: '9px 12px', background: '#FFF7E6', borderBottom: '0.5px solid #F0D488', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <i className="ti ti-scan" style={{ color: '#BA7517', fontSize: 15 }} />
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#5A4200', flex: 1, lineHeight: 1.3 }}>
+              {unconfirmedDevices.length} detected device{unconfirmedDevices.length === 1 ? '' : 's'} to review
+            </div>
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {unconfirmedDevices.map(d => (
+              <div key={d.id} style={{ padding: '7px 12px', borderBottom: '0.5px solid #f0efe9' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                  <div onClick={() => handleDeviceSelect(d.id)} title="Locate on canvas"
+                    style={{ width: 26, height: 26, borderRadius: 6, background: d.color + '20', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}>
+                    <DeviceIcon dtype={d.dtype} color={d.color} size={18} />
+                  </div>
+                  <select value={d.dtype} onChange={e => retypeDetectedDevice(d.id, e.target.value)}
+                    style={{ fontSize: 11, flex: 1, border: '0.5px solid #ddd', borderRadius: 4, padding: '3px 4px', minWidth: 0 }}>
+                    {DEVICE_DEFS.flatMap(section => section.items).map(item => (
+                      <option key={item.dtype} value={item.dtype}>{item.label}</option>
+                    ))}
+                  </select>
+                  <button onClick={() => confirmDetectedDevice(d.id)} title="Confirm this device"
+                    style={{ background: 'none', border: 'none', color: '#1D9E75', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+                    <i className="ti ti-check" style={{ fontSize: 15 }} />
+                  </button>
+                  <button onClick={() => discardDetectedDevice(d.id)} title="Discard — not a real device"
+                    style={{ background: 'none', border: 'none', color: '#A32D2D', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+                    <i className="ti ti-x" style={{ fontSize: 15 }} />
+                  </button>
+                </div>
+                <input value={d.label} placeholder="Label (e.g. IDF 1-1)" onChange={e => relabelDetectedDevice(d.id, e.target.value)}
+                  style={{ fontSize: 11, width: '100%', border: '0.5px solid #ddd', borderRadius: 4, padding: '3px 6px', boxSizing: 'border-box' }} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 6, padding: '8px 12px', borderTop: '0.5px solid #f0efe9' }}>
+            <button onClick={confirmAllDetectedDevices} style={{ ...tbBtn, flex: 1, justifyContent: 'center', color: '#1D9E75', borderColor: '#9AD9BE' }}>
+              <i className="ti ti-checks" /> Confirm all
+            </button>
+            <button onClick={discardAllDetectedDevices} style={{ ...tbBtn, flex: 1, justifyContent: 'center', color: '#A32D2D', borderColor: '#F09595' }}>
+              <i className="ti ti-trash" /> Discard all
+            </button>
           </div>
         </div>
       )}

@@ -26,6 +26,7 @@ A web app for network site surveys — place RAK Gateways, Reolink fisheye camer
 6. Before clicking Deploy, click **"Environment Variables"** and add:
    - `REACT_APP_SUPABASE_URL` → your Supabase Project URL
    - `REACT_APP_SUPABASE_ANON_KEY` → your Supabase anon key
+   - `ANTHROPIC_API_KEY` → an API key from **https://console.anthropic.com** — powers the "Detect Devices" button, which scans imported PDF floor plans for markers already drawn on them (e.g. a System Surveyor export) so they can be added as editable devices instead of re-placed by hand. Skip this if you don't need that feature — the rest of the app works fine without it, the button just won't appear until a PDF is loaded and will error if clicked without a key set.
 7. Click **Deploy** — Vercel builds and hosts it automatically
 8. Your app is live at `https://site-surveyor-yourname.vercel.app`
 
@@ -40,6 +41,7 @@ A web app for network site surveys — place RAK Gateways, Reolink fisheye camer
 ## Features
 
 - Upload PDF or image floor plans
+- **Detect Devices** — scan an imported PDF for device markers already drawn on it (e.g. a System Surveyor export) and add them as editable devices, with a review step to confirm, retype, or discard each one before it's kept (requires `ANTHROPIC_API_KEY`)
 - Drag-and-drop device placement: RAK Gateways, Reolink Fisheye, Dome/Bullet cameras, MDF/IDF stamps, PoE switches, NVR, Access Points, Card Readers, Intercoms
 - **LoRa heat map** for RAK Gateways — set range in feet, adjust signal strength per gateway
 - **Cable pathways** — Cat6, Fiber, Coax, Power with visual styles
