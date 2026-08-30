@@ -764,7 +764,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               width: d.maskW, height: d.maskH,
               borderRadius: Math.min(d.maskW, d.maskH) / 2,
               background: '#fdfdfb',
-              boxShadow: '0 0 10px 8px #fdfdfbdd',
+              boxShadow: '0 0 4px 2px #fdfdfbdd',
               pointerEvents: 'none',
             }} />
           ))}

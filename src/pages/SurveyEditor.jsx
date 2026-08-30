@@ -372,8 +372,11 @@ export default function SurveyEditor() {
       // the original flattened marker pixels underneath — sized to the
       // actual detected blob plus generous padding, since the original
       // export's icon+label combo is usually wider than just the dot.
-      maskW: Math.max(m.width, 24) + 34,
-      maskH: Math.max(m.height, 24) + 34,
+      // Capped as well as floored — a bad detection shouldn't be able
+      // to produce a patch bigger than a couple of marker-widths, even
+      // if the size math upstream ever misbehaves.
+      maskW: Math.min(Math.max(m.width, 24) + 34, 140),
+      maskH: Math.min(Math.max(m.height, 24) + 34, 140),
     }))
     updateDevices([...devices, ...newDevices])
     setSaveMsg(`Detected ${newDevices.length} marker${newDevices.length === 1 ? '' : 's'} by color — review the highlighted devices below (labeled as Gateways by default, retype if any are actually IDF/MDF)`)
