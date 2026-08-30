@@ -78,16 +78,19 @@ function findBlobs(imageData, width, height, target, tolerance, minPixels) {
       stackX[sp] = x; stackY[sp] = y; sp++
       visited[idx] = 1
       let sumX = 0, sumY = 0, count = 0
+      let minX = x, maxX = x, minY = y, maxY = y
       while (sp > 0) {
         sp--
         const cx = stackX[sp], cy = stackY[sp]
         sumX += cx; sumY += cy; count++
+        if (cx < minX) minX = cx; if (cx > maxX) maxX = cx
+        if (cy < minY) minY = cy; if (cy > maxY) maxY = cy
         if (cx + 1 < width) { const n = cy * width + (cx + 1); if (matches[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx + 1; stackY[sp] = cy; sp++ } }
         if (cx - 1 >= 0) { const n = cy * width + (cx - 1); if (matches[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx - 1; stackY[sp] = cy; sp++ } }
         if (cy + 1 < height) { const n = (cy + 1) * width + cx; if (matches[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy + 1; sp++ } }
         if (cy - 1 >= 0) { const n = (cy - 1) * width + cx; if (matches[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy - 1; sp++ } }
       }
-      if (count >= minPixels) blobs.push({ x: sumX / count, y: sumY / count, pixelCount: count })
+      if (count >= minPixels) blobs.push({ x: sumX / count, y: sumY / count, pixelCount: count, width: maxX - minX, height: maxY - minY })
     }
   }
   return blobs
@@ -119,6 +122,11 @@ export async function detectMarkersByColor(floorPlanUrl, floorPlanPage, opts = {
   const blobs = findBlobs(imageData, canvas.width, canvas.height, target, tolerance, minPixels)
   const scaleX = pointWidth / canvas.width
   const scaleY = pointHeight / canvas.height
-  const markers = blobs.map(b => ({ x: b.x * scaleX, y: b.y * scaleY }))
+  const markers = blobs.map(b => ({
+    x: b.x * scaleX,
+    y: b.y * scaleY,
+    width: b.width * scaleX,
+    height: b.height * scaleY,
+  }))
   return { markers, error: null }
 }

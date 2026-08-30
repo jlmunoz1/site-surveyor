@@ -368,6 +368,12 @@ export default function SurveyEditor() {
       model: '', ip: '', notes: '', cost: 0, qty: 1, status: 'existing', photoUrl: '',
       hmRangeFt: 120, hmStrength: 0.75,
       unconfirmed: true,
+      // A soft patch drawn behind the icon (see SurveyCanvas) to cover
+      // the original flattened marker pixels underneath — sized to the
+      // actual detected blob plus generous padding, since the original
+      // export's icon+label combo is usually wider than just the dot.
+      maskW: Math.max(m.width, 24) + 34,
+      maskH: Math.max(m.height, 24) + 34,
     }))
     updateDevices([...devices, ...newDevices])
     setSaveMsg(`Detected ${newDevices.length} marker${newDevices.length === 1 ? '' : 's'} by color — review the highlighted devices below (labeled as Gateways by default, retype if any are actually IDF/MDF)`)

@@ -750,6 +750,25 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               successfully but never actually show up. */}
           <svg ref={drawSvgRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }} />
 
+          {/* Cover patches for AI/color-detected devices — hides the
+              original flattened marker pixels from the source PDF/image
+              underneath the new editable device icon. Purely a visual
+              overlay in this same pan/zoom layer; the underlying floor
+              plan image itself is never modified, so this disappears
+              automatically if the device it belongs to gets deleted. */}
+          {devices.filter(d => d.maskW && d.maskH).map(d => (
+            <div key={'mask-' + d.id} style={{
+              position: 'absolute',
+              left: d.x + 19 - d.maskW / 2,
+              top: d.y + 19 - d.maskH / 2,
+              width: d.maskW, height: d.maskH,
+              borderRadius: Math.min(d.maskW, d.maskH) / 2,
+              background: '#fdfdfb',
+              boxShadow: '0 0 10px 8px #fdfdfbdd',
+              pointerEvents: 'none',
+            }} />
+          ))}
+
           {devices.map(d => (
             <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
               onDoubleClick={e => {
@@ -766,7 +785,14 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               }}
               style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
               {(() => {
-                const sz = getSizeForDevice(d.dtype)
+                // Detected devices render smaller while awaiting review
+                // — the dashed amber outline + badge already flag them
+                // as "needs review," and full-size renders as a fairly
+                // busy shape at this scale (the RAK Gateway icon in
+                // particular is a dense 8-petal flower). Confirming a
+                // device drops `unconfirmed`, so it snaps back to the
+                // survey's normal icon size immediately.
+                const sz = getSizeForDevice(d.dtype) * (d.unconfirmed ? 0.55 : 1)
                 const status = d.status || 'existing'
                 const statusInfo = DEVICE_STATUSES[status] || DEVICE_STATUSES.existing
                 const isProposed = status === 'proposed'
