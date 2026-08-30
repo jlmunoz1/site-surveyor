@@ -47,6 +47,7 @@ export default function Dashboard() {
   // Expanded projects
   const [expanded, setExpanded] = useState({})
   const [uploadingPlanFor, setUploadingPlanFor] = useState(null) // project id currently uploading
+  const [folderImportProgress, setFolderImportProgress] = useState(null) // { projectId, done, total } while a batch import is running
 
   // Click-to-edit project name — mirrors the survey editor's rename
   // pattern (click name, edit inline, blur/Enter to save).
@@ -66,6 +67,7 @@ export default function Dashboard() {
   const [inviteError, setInviteError] = useState('')
   const [inviteInfo, setInviteInfo] = useState('')
   const floorPlanInputRef = useRef(null)
+  const folderImportInputRef = useRef(null)
   const pendingProjectRef = useRef(null)
 
   useEffect(() => {
@@ -259,6 +261,71 @@ export default function Dashboard() {
     loadAll()
   }
 
+  function triggerFolderImport(project) {
+    pendingProjectRef.current = project
+    folderImportInputRef.current.click()
+  }
+
+  // Imports every floor plan file found in a selected folder (or
+  // multi-select) in one go — one survey per file, with the same
+  // per-file "split a multi-page PDF into one survey per floor" logic
+  // handleFloorPlanFileChange already applies to a single upload.
+  // Runs sequentially rather than in parallel so a slow/large file
+  // doesn't race the DB writes for the ones before it, and so progress
+  // can be reported file-by-file.
+  async function handleFolderImportChange(e) {
+    const rawFiles = Array.from(e.target.files || [])
+    e.target.value = ''
+    const project = pendingProjectRef.current
+    pendingProjectRef.current = null
+    if (!rawFiles.length || !project) return
+
+    // A folder picker returns everything in the folder, not just floor
+    // plans — filter down to images/PDFs and skip OS clutter like
+    // .DS_Store or Thumbs.db, then process in a stable, readable order.
+    const files = rawFiles
+      .filter(f => f.type === 'application/pdf' || f.type.startsWith('image/') || /\.(pdf|png|jpe?g|gif|webp)$/i.test(f.name))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+
+    if (!files.length) { setError('No image or PDF files found in that folder'); return }
+
+    setError(''); setInfo('')
+    setFolderImportProgress({ projectId: project.id, done: 0, total: files.length })
+
+    let totalCreated = 0
+    let filesWithErrors = []
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      setFolderImportProgress({ projectId: project.id, done: i, total: files.length })
+      const tempId = uuidv4()
+      const { url, error: uploadErr } = await uploadFloorPlan(tempId, file)
+      if (uploadErr) { filesWithErrors.push(file.name); continue }
+
+      const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+      let pageCount = 1
+      if (isPDF) {
+        try { pageCount = await getPdfPageCount(url) } catch (err) { console.warn(`Could not read page count for ${file.name}:`, err) }
+      }
+
+      const baseName = file.name.replace(/\.[^.]+$/, '')
+      for (let p = 1; p <= pageCount; p++) {
+        const name = pageCount > 1 ? `${baseName} — Floor ${p}` : baseName
+        const { data: newSurvey, error: createErr } = await createSurvey(user.id, name, project.id)
+        if (createErr || !newSurvey) { console.warn(`Couldn't create survey for ${file.name} (page ${p}):`, createErr); continue }
+        const { error: saveErr } = await saveSurvey(newSurvey.id, { floor_plan_url: url, floor_plan_page: p })
+        if (!saveErr) totalCreated++
+      }
+    }
+
+    setFolderImportProgress(null)
+    const skipped = filesWithErrors.length
+    setInfo(skipped === 0
+      ? `Imported ${totalCreated} survey${totalCreated !== 1 ? 's' : ''} from ${files.length} file${files.length !== 1 ? 's' : ''}`
+      : `Imported ${totalCreated} survey${totalCreated !== 1 ? 's' : ''} — ${skipped} file${skipped !== 1 ? 's' : ''} failed to upload (${filesWithErrors.join(', ')})`)
+    setTimeout(() => setInfo(''), skipped ? 8000 : 4000)
+    loadAll()
+  }
+
   async function openShareModal(project) {
     setShareProject(project)
     setInviteEmail(''); setInviteError(''); setInviteInfo('')
@@ -391,6 +458,7 @@ export default function Dashboard() {
         {error && <p style={{ fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{error}</p>}
         {info && <p style={{ fontSize: 12, color: '#0F6E56', background: '#E1F5EE', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{info}</p>}
         <input ref={floorPlanInputRef} type="file" accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFloorPlanFileChange} />
+        <input ref={folderImportInputRef} type="file" webkitdirectory="" directory="" multiple accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFolderImportChange} />
 
         {/* New enterprise form */}
         {showNewEnterprise && (
@@ -506,6 +574,14 @@ export default function Dashboard() {
                       disabled={uploadingPlanFor === project.id}
                       style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
                       {uploadingPlanFor === project.id ? 'Uploading…' : '+ Floor plan'}
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); triggerFolderImport(project) }}
+                      disabled={folderImportProgress?.projectId === project.id}
+                      title="Select a folder of floor plans (PDFs/images) and create one survey per file"
+                      style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
+                      {folderImportProgress?.projectId === project.id
+                        ? `Importing ${folderImportProgress.done + 1}/${folderImportProgress.total}…`
+                        : (<><i className="ti ti-folder-plus" style={{ marginRight: 3 }} /> Import folder</>)}
                     </button>
                     <button onClick={e => { e.stopPropagation(); setNewSurveyProject(project.id); setShowNewSurvey(true) }}
                       style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>+ Survey</button>
