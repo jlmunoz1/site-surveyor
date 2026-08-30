@@ -7,6 +7,7 @@ import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES, COLOR_PALETTE }
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfPageCount, isPdfUrl } from '../lib/pdf'
 import { detectDevicesFromPdf } from '../lib/deviceDetection'
+import { detectMarkersByColor } from '../lib/colorDetect'
 import { buildSurveyPdfBlob, downloadBlob, safeFileName } from '../lib/exportPdf'
 
 // Sage Port Mapper's stable production URL.
@@ -336,6 +337,40 @@ export default function SurveyEditor() {
   const unconfirmedDevices = devices.filter(d => d.unconfirmed)
   const isPdfFloorPlan = isPdfUrl(floorPlanUrl)
 
+  // Free, instant, no-API-key detection — matches the known marker
+  // color used by tools like System Surveyor and clusters matches into
+  // blobs. Finds WHERE markers are; can't read the "GW 74" text next
+  // to them, so detected devices default to Gateway (rak-gw, the type
+  // this color is actually used for on real exports) with a blank
+  // label for the person to fill in during review.
+  async function handleDetectDevicesByColor(urlOverride, pageOverride) {
+    const url = urlOverride || floorPlanUrl
+    const page = pageOverride || floorPlanPage
+    if (!url) return
+    setDetecting(true); setDetectError('')
+    const { markers, error } = await detectMarkersByColor(url, page)
+    setDetecting(false)
+    if (error) { setDetectError(error); return }
+    if (!markers.length) {
+      setSaveMsg('No matching purple markers found on this page')
+      setTimeout(() => setSaveMsg(''), 3500)
+      return
+    }
+    const def = getDeviceDef('rak-gw')
+    const newDevices = markers.map(m => ({
+      id: uuidv4(),
+      dtype: 'rak-gw', label: '', color: def?.color || '#3B6D11',
+      coverage: def?.coverage || 0, heatmap: def?.heatmap || false,
+      x: m.x - 19, y: m.y - 19,
+      model: '', ip: '', notes: '', cost: 0, qty: 1, status: 'existing', photoUrl: '',
+      hmRangeFt: 120, hmStrength: 0.75,
+      unconfirmed: true,
+    }))
+    updateDevices([...devices, ...newDevices])
+    setSaveMsg(`Detected ${newDevices.length} marker${newDevices.length === 1 ? '' : 's'} by color — review the highlighted devices below (labeled as Gateways by default, retype if any are actually IDF/MDF)`)
+    setTimeout(() => setSaveMsg(''), 6000)
+  }
+
   async function handleDetectDevices(urlOverride, pageOverride) {
     const url = urlOverride || floorPlanUrl
     const page = pageOverride || floorPlanPage
@@ -537,13 +572,13 @@ export default function SurveyEditor() {
     setSaving(false); setSaveMsg('Floor plan uploaded'); setTimeout(() => setSaveMsg(''), 2500)
     e.target.value = ''
 
-    // If it's a PDF (e.g. a System Surveyor export), offer to scan it
-    // right away for markers already drawn on the plan — these come
-    // in as flattened pixels with no metadata, so detection is the only
-    // way to recover them as editable devices instead of re-placing
-    // everything by hand.
-    if (isPDF && window.confirm('Scan this PDF for existing device markers (gateways, IDF/MDF, etc.) and add them as editable devices you can review?')) {
-      handleDetectDevices(url, 1)
+    // Offer to scan it right away for markers already drawn on the
+    // plan — these come in as flattened pixels with no metadata, so
+    // detection is the only way to recover them as editable devices
+    // instead of re-placing everything by hand. Uses the free,
+    // instant color-matching detector — no API key required.
+    if (isPDF && window.confirm('Scan this PDF for existing device markers (matches by marker color — instant, no AI key needed) and add them as editable devices you can review?')) {
+      handleDetectDevicesByColor(url, 1)
     }
   }
 
@@ -736,10 +771,16 @@ export default function SurveyEditor() {
                 <button style={{ ...tbBtn, color: '#1D9E75', borderColor: '#9AD9BE' }} onClick={() => navigate(`/survey/${id}/georeference`)} title="Overlay this floor plan on satellite imagery">
                   <i className="ti ti-map-pin" /> Georeference
                 </button>
-                {isPdfFloorPlan && (
-                  <button style={{ ...tbBtn, color: '#BA7517', borderColor: '#F0D488' }} onClick={() => handleDetectDevices()} disabled={detecting}
-                    title="Scan this PDF page for device markers already drawn on it (e.g. a System Surveyor export) and add them as editable devices">
+                {floorPlanUrl && (
+                  <button style={{ ...tbBtn, color: '#BA7517', borderColor: '#F0D488' }} onClick={handleDetectDevicesByColor} disabled={detecting}
+                    title="Free, instant — finds markers on the floor plan by matching their color (no AI, no API key needed)">
                     <i className={`ti ti-${detecting ? 'loader-2' : 'scan'}`} /> {detecting ? 'Detecting…' : 'Detect Devices'}
+                  </button>
+                )}
+                {isPdfFloorPlan && (
+                  <button style={{ ...tbBtn, color: '#534AB7', borderColor: '#AFA9EC', fontSize: 11 }} onClick={() => handleDetectDevices()} disabled={detecting}
+                    title="Optional — uses AI to also read each marker's label/type (e.g. distinguishing GW vs IDF text); requires an ANTHROPIC_API_KEY set on the server">
+                    <i className="ti ti-sparkles" /> AI Label Detect
                   </button>
                 )}
               </>
