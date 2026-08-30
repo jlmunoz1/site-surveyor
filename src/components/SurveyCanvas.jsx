@@ -764,14 +764,24 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               point dimensions, which is what caused this to blanket
               large areas of some floor plans. */}
           {devices.filter(d => d.mask).map(d => {
-            const maskSz = getSizeForDevice(d.dtype) * 2
+            // AI detection can supply a tight per-marker bounding box
+            // (capped upstream); color-based detection can't, so it
+            // falls back to a size relative to the icon itself — a
+            // value we already know renders sanely at any zoom/PDF.
+            // Floored here too (not just at detection time) so an
+            // already-saved device with a bad, near-zero stored value
+            // self-heals on the next load instead of staying invisible
+            // until re-detected.
+            const iconFallback = getSizeForDevice(d.dtype) * 2
+            const maskW = Math.max(d.maskW || iconFallback, iconFallback * 0.6)
+            const maskH = Math.max(d.maskH || iconFallback, iconFallback * 0.6)
             return (
               <div key={'mask-' + d.id} style={{
                 position: 'absolute',
-                left: d.x + 19 - maskSz / 2,
-                top: d.y + 19 - maskSz / 2,
-                width: maskSz, height: maskSz,
-                borderRadius: maskSz / 2,
+                left: d.x + 19 - maskW / 2,
+                top: d.y + 19 - maskH / 2,
+                width: maskW, height: maskH,
+                borderRadius: Math.min(maskW, maskH) / 2,
                 background: '#fdfdfb',
                 boxShadow: '0 0 3px 1px #fdfdfbdd',
                 pointerEvents: 'none',

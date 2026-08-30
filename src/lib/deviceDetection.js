@@ -33,14 +33,30 @@ export async function detectDevicesFromPdf(floorPlanUrl, floorPlanPage) {
     return { markers: [], error: data?.error || 'Detection failed' }
   }
 
-  const markers = (Array.isArray(data.markers) ? data.markers : []).map(m => ({
-    // Convert from the fraction-of-image-dimensions the model returns
-    // into the floor plan's native point space, matching where devices
-    // placed by hand already live.
-    x: m.x * rendered.pdfWidthPts,
-    y: m.y * rendered.pdfHeightPts,
-    dtype: m.dtype,
-    label: m.label || '',
-  }))
+  const markers = (Array.isArray(data.markers) ? data.markers : []).map(m => {
+    const marker = {
+      // Convert from the fraction-of-image-dimensions the model
+      // returns into the floor plan's native point space, matching
+      // where devices placed by hand already live.
+      x: m.x * rendered.pdfWidthPts,
+      y: m.y * rendered.pdfHeightPts,
+      dtype: m.dtype,
+      label: m.label || '',
+    }
+    // Bounding box is optional (dropped server-side if it looked
+    // malformed) — same fraction-to-point conversion as x/y above,
+    // which is straightforward and doesn't carry the scale risk the
+    // raw-pixel-measurement approach in colorDetect.js had.
+    if (typeof m.x0 === 'number' && typeof m.x1 === 'number' && typeof m.y0 === 'number' && typeof m.y1 === 'number') {
+      const rawW = (m.x1 - m.x0) * rendered.pdfWidthPts
+      const rawH = (m.y1 - m.y0) * rendered.pdfHeightPts
+      // Floored as well as capped — a degenerate/near-zero box should
+      // fall back to a sane minimum rather than render as an
+      // effectively invisible mask.
+      marker.maskW = Math.min(Math.max(rawW, 20), 150)
+      marker.maskH = Math.min(Math.max(rawH, 20), 150)
+    }
+    return marker
+  })
   return { markers, error: null }
 }

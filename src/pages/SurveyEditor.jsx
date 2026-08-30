@@ -408,6 +408,12 @@ export default function SurveyEditor() {
         model: '', ip: '', notes: '', cost: 0, qty: 1, status: 'existing', photoUrl: '',
         hmRangeFt: 120, hmStrength: 0.75,
         unconfirmed: true,
+        mask: true,
+        // AI detection can return a tight bounding box for the marker
+        // icon itself — when present, SurveyCanvas uses these instead
+        // of its icon-size-based guess for a more precisely fitted
+        // cover patch.
+        ...(m.maskW && m.maskH ? { maskW: m.maskW, maskH: m.maskH } : {}),
       }
     })
     updateDevices([...devices, ...newDevices])
@@ -591,8 +597,8 @@ export default function SurveyEditor() {
     // detection is the only way to recover them as editable devices
     // instead of re-placing everything by hand. Uses the free,
     // instant color-matching detector — no API key required.
-    if (isPDF && window.confirm('Scan this PDF for existing device markers (matches by marker color — instant, no AI key needed) and add them as editable devices you can review?')) {
-      handleDetectDevicesByColor(url, 1)
+    if (isPDF && window.confirm('Scan this PDF for existing device markers using AI (also reads each marker\'s label) and add them as editable devices you can review?')) {
+      handleDetectDevices(url, 1)
     }
   }
 
@@ -785,16 +791,16 @@ export default function SurveyEditor() {
                 <button style={{ ...tbBtn, color: '#1D9E75', borderColor: '#9AD9BE' }} onClick={() => navigate(`/survey/${id}/georeference`)} title="Overlay this floor plan on satellite imagery">
                   <i className="ti ti-map-pin" /> Georeference
                 </button>
-                {floorPlanUrl && (
-                  <button style={{ ...tbBtn, color: '#BA7517', borderColor: '#F0D488' }} onClick={() => handleDetectDevicesByColor()} disabled={detecting}
-                    title="Free, instant — finds markers on the floor plan by matching their color (no AI, no API key needed)">
-                    <i className={`ti ti-${detecting ? 'loader-2' : 'scan'}`} /> {detecting ? 'Detecting…' : 'Detect Devices'}
+                {isPdfFloorPlan && (
+                  <button style={{ ...tbBtn, color: '#534AB7', borderColor: '#AFA9EC' }} onClick={() => handleDetectDevices()} disabled={detecting}
+                    title="Uses AI to find markers and read each one's label/type (e.g. distinguishing GW vs IDF text) — requires an ANTHROPIC_API_KEY set on the server">
+                    <i className={`ti ti-${detecting ? 'loader-2' : 'sparkles'}`} /> {detecting ? 'Detecting…' : 'Detect Devices'}
                   </button>
                 )}
-                {isPdfFloorPlan && (
-                  <button style={{ ...tbBtn, color: '#534AB7', borderColor: '#AFA9EC', fontSize: 11 }} onClick={() => handleDetectDevices()} disabled={detecting}
-                    title="Optional — uses AI to also read each marker's label/type (e.g. distinguishing GW vs IDF text); requires an ANTHROPIC_API_KEY set on the server">
-                    <i className="ti ti-sparkles" /> AI Label Detect
+                {floorPlanUrl && (
+                  <button style={{ ...tbBtn, color: '#BA7517', borderColor: '#F0D488', fontSize: 11 }} onClick={() => handleDetectDevicesByColor()} disabled={detecting}
+                    title="Free, no API key — finds markers by matching their color only, can't read label text (fallback for when AI detection isn't set up)">
+                    <i className="ti ti-scan" /> Quick Color Scan
                   </button>
                 )}
               </>

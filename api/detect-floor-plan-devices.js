@@ -51,13 +51,14 @@ Read the actual text printed on or next to each marker — this is the most reli
 
 For each marker found, report:
 - "x" and "y": its center position as a FRACTION of the image width/height respectively (each a number between 0 and 1, top-left origin)
+- "x0","y0","x1","y1": a tight bounding box around the marker's icon/dot ONLY (not the text label beside it) as fractions of image width/height, top-left origin — used to size a patch that covers just the icon
 - "dtype": the closest matching type from this exact list of strings:
 ${typeList}
   If nothing matches well, use "sage-equip".
 - "label": the exact text found on/near the marker (e.g. "GW 1", "IDF 1-1"), or "" if none is legible
 
 Respond with ONLY a raw JSON array, no markdown fences and no other text, e.g.:
-[{"x":0.42,"y":0.31,"dtype":"rak-gw","label":"GW 1"}]
+[{"x":0.42,"y":0.31,"x0":0.40,"y0":0.29,"x1":0.44,"y1":0.33,"dtype":"rak-gw","label":"GW 1"}]
 
 If you find no markers, respond with exactly: []`
 
@@ -101,14 +102,32 @@ If you find no markers, respond with exactly: []`
     }
 
     const validDtypeSet = new Set(validDtypes.map(t => t.dtype))
+    const clamp01 = v => Math.max(0, Math.min(1, v))
     markers = markers
       .filter(m => m && typeof m.x === 'number' && typeof m.y === 'number' && m.x >= 0 && m.x <= 1 && m.y >= 0 && m.y <= 1)
-      .map(m => ({
-        x: m.x,
-        y: m.y,
-        dtype: validDtypeSet.has(m.dtype) ? m.dtype : 'sage-equip',
-        label: typeof m.label === 'string' ? m.label.slice(0, 120) : '',
-      }))
+      .map(m => {
+        const out = {
+          x: m.x,
+          y: m.y,
+          dtype: validDtypeSet.has(m.dtype) ? m.dtype : 'sage-equip',
+          label: typeof m.label === 'string' ? m.label.slice(0, 120) : '',
+        }
+        const hasBox = ['x0', 'y0', 'x1', 'y1'].every(k => typeof m[k] === 'number')
+        if (hasBox) {
+          const x0 = clamp01(m.x0), y0 = clamp01(m.y0), x1 = clamp01(m.x1), y1 = clamp01(m.y1)
+          // Only keep the box if it's sane (non-inverted, non-zero, and
+          // not absurdly large) — otherwise drop it and let the client
+          // fall back to icon-based sizing rather than trust a bad box.
+          // Guards both directions — too big (blankets real content,
+          // the original bug) and too small (a near-zero/degenerate
+          // box that produces a practically invisible cover patch,
+          // which is what actually happened here).
+          if (x1 > x0 && y1 > y0 && (x1 - x0) >= 0.008 && (y1 - y0) >= 0.008 && (x1 - x0) < 0.08 && (y1 - y0) < 0.08) {
+            out.x0 = x0; out.y0 = y0; out.x1 = x1; out.y1 = y1
+          }
+        }
+        return out
+      })
 
     res.status(200).json({ markers })
   } catch (err) {
