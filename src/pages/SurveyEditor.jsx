@@ -344,8 +344,11 @@ export default function SurveyEditor() {
   // this color is actually used for on real exports) with a blank
   // label for the person to fill in during review.
   async function handleDetectDevicesByColor(urlOverride, pageOverride) {
-    const url = urlOverride || floorPlanUrl
-    const page = pageOverride || floorPlanPage
+    // Defensive: only accept a real string override — guards against a
+    // handler being wired directly to onClick, which would otherwise
+    // pass the DOM click event itself as urlOverride.
+    const url = (typeof urlOverride === 'string' && urlOverride) || floorPlanUrl
+    const page = (typeof pageOverride === 'number' && pageOverride) || floorPlanPage
     if (!url) return
     setDetecting(true); setDetectError('')
     const { markers, error } = await detectMarkersByColor(url, page)
@@ -372,8 +375,11 @@ export default function SurveyEditor() {
   }
 
   async function handleDetectDevices(urlOverride, pageOverride) {
-    const url = urlOverride || floorPlanUrl
-    const page = pageOverride || floorPlanPage
+    // Defensive: only accept a real string override — guards against a
+    // handler being wired directly to onClick, which would otherwise
+    // pass the DOM click event itself as urlOverride.
+    const url = (typeof urlOverride === 'string' && urlOverride) || floorPlanUrl
+    const page = (typeof pageOverride === 'number' && pageOverride) || floorPlanPage
     if (!url) return
     setDetecting(true); setDetectError('')
     const { markers, error } = await detectDevicesFromPdf(url, page)
@@ -772,7 +778,7 @@ export default function SurveyEditor() {
                   <i className="ti ti-map-pin" /> Georeference
                 </button>
                 {floorPlanUrl && (
-                  <button style={{ ...tbBtn, color: '#BA7517', borderColor: '#F0D488' }} onClick={handleDetectDevicesByColor} disabled={detecting}
+                  <button style={{ ...tbBtn, color: '#BA7517', borderColor: '#F0D488' }} onClick={() => handleDetectDevicesByColor()} disabled={detecting}
                     title="Free, instant — finds markers on the floor plan by matching their color (no AI, no API key needed)">
                     <i className={`ti ti-${detecting ? 'loader-2' : 'scan'}`} /> {detecting ? 'Detecting…' : 'Detect Devices'}
                   </button>
