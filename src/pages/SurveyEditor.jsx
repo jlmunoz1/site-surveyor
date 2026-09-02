@@ -110,6 +110,7 @@ export default function SurveyEditor() {
   const [showShare, setShowShare] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
   const [showScale, setShowScale] = useState(false)
+  const [showKey, setShowKey] = useState(false)
   const [scaleInput, setScaleInput] = useState('4')
   const [showBOM, setShowBOM] = useState(false)
   const [portMapperSiteId, setPortMapperSiteId] = useState(null)
@@ -335,6 +336,13 @@ export default function SurveyEditor() {
     }
   }
   const unconfirmedDevices = devices.filter(d => d.unconfirmed)
+
+  // For the Key/legend panel — one row per exact device type (not per
+  // category), so "RAK Gateway" and "Reolink Fisheye" show as separate
+  // counts, each in the same order they appear in the sidebar palette.
+  const deviceCountsByType = DEVICE_DEFS.flatMap(section => section.items)
+    .map(item => ({ ...item, count: devices.filter(d => d.dtype === item.dtype).length }))
+    .filter(item => item.count > 0)
   const isPdfFloorPlan = isPdfUrl(floorPlanUrl)
 
   // Free, instant, no-API-key detection — matches the known marker
@@ -890,6 +898,11 @@ export default function SurveyEditor() {
           onClick={() => measuring ? setMeasuring(false) : startMeasure()}
           title="Drag a line to measure a distance in feet">
           <i className="ti ti-ruler-3" /> {measuring ? 'Drag to measure…' : 'Measure'}
+        </button>
+        <button style={{ ...tbBtn, ...(showKey ? { color: '#378ADD', borderColor: '#378ADD', background: '#E9F2FC' } : {}) }}
+          onClick={() => setShowKey(v => !v)}
+          title="Show a count of each device type placed on this floor plan">
+          <i className="ti ti-list-details" /> Key
         </button>
         {!isShared && (
           <button style={tbBtn} onClick={() => setShowScale(true)} title="Manually enter px/ft">
@@ -1541,6 +1554,40 @@ export default function SurveyEditor() {
             <div style={{ padding: '6px 16px', fontSize: 10.5, color: '#aaa', borderTop: '0.5px solid #f0efea' }}>
               If this doesn't load, the other app may block embedding — use "Open in new tab" instead.
             </div>
+          </div>
+        </div>
+      )}
+
+      {showKey && (
+        <div style={{
+          position: 'fixed', left: 190, bottom: 16, width: 230, maxHeight: 380,
+          background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10,
+          boxShadow: '0 4px 18px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column',
+          zIndex: 40, overflow: 'hidden',
+        }}>
+          <div style={{ padding: '9px 12px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <i className="ti ti-list-details" style={{ color: '#378ADD', fontSize: 15 }} />
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a18', flex: 1 }}>Key</div>
+            <button onClick={() => setShowKey(false)} style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer', padding: 2 }}>
+              <i className="ti ti-x" style={{ fontSize: 14 }} />
+            </button>
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {deviceCountsByType.length === 0 ? (
+              <div style={{ padding: '16px 12px', fontSize: 12, color: '#aaa', textAlign: 'center' }}>No devices placed yet.</div>
+            ) : deviceCountsByType.map(item => (
+              <div key={item.dtype} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '0.5px solid #f0efea' }}>
+                <div style={{ width: 24, height: 24, borderRadius: 6, background: item.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <DeviceIcon dtype={item.dtype} color={item.color} size={16} />
+                </div>
+                <span style={{ fontSize: 12.5, color: '#333', flex: 1 }}>{item.label}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#1a1a18' }}>{item.count}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: '7px 12px', borderTop: '0.5px solid #f0efea', fontSize: 11, color: '#888', display: 'flex', justifyContent: 'space-between' }}>
+            <span>Total</span>
+            <span style={{ fontWeight: 600, color: '#1a1a18' }}>{devices.length}</span>
           </div>
         </div>
       )}
