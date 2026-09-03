@@ -810,7 +810,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                 const newLabel = prompt('Rename device:', d.label)
                 if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
               }}
-              style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+              style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none' }}>
               {(() => {
                 // Detected devices render smaller while awaiting review
                 // — the dashed amber outline + badge already flag them
@@ -863,7 +863,10 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                           const newLabel = prompt('Rename device:', d.label)
                           if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
                         }}
-                        style={{ fontSize: getLabelSizeForDevice(d.dtype), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: readOnly ? 'default' : 'text' }}>
+                        style={{
+                          position: 'absolute', top: sz + 2, left: '50%', transform: 'translateX(-50%)',
+                          fontSize: getLabelSizeForDevice(d.dtype), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: readOnly ? 'default' : 'text'
+                        }}>
                         {d.label}
                         {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
                       </div>

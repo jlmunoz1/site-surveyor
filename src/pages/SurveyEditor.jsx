@@ -159,7 +159,7 @@ export default function SurveyEditor() {
     if (data.label_sizes) {
       setLabelSizes(typeof data.label_sizes === 'object' ? data.label_sizes : {cameras:10,lora:13,network:10,access:10})
     }
-    setHiddenLabelTypes(Array.isArray(data.hidden_label_types) ? data.hidden_label_types : [])
+    setHiddenLabelTypes(Array.isArray(data.hidden_label_types) ? data.hidden_label_types : ['reolink-fe'])
     setLoading(false)
   }
 
