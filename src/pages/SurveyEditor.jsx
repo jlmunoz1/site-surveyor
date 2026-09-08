@@ -341,8 +341,20 @@ export default function SurveyEditor() {
   // category), so "RAK Gateway" and "Reolink Fisheye" show as separate
   // counts, each in the same order they appear in the sidebar palette.
   const deviceCountsByType = DEVICE_DEFS.flatMap(section => section.items)
-    .map(item => ({ ...item, count: devices.filter(d => d.dtype === item.dtype).length }))
+    .map(item => {
+      const matching = devices.filter(d => d.dtype === item.dtype)
+      return { ...item, count: matching.length, color: matching[0]?.color || item.color }
+    })
     .filter(item => item.count > 0)
+
+  // Recolors every placed device of one type at once, from the Key
+  // panel — a per-survey override, not a change to the shared device
+  // palette defaults (which would otherwise affect every other survey
+  // too). New devices of this type placed afterward still start from
+  // the normal palette color unless changed again here.
+  function recolorDeviceType(dtype, newColor) {
+    updateDevices(devices.map(d => d.dtype === dtype ? { ...d, color: newColor } : d))
+  }
   const isPdfFloorPlan = isPdfUrl(floorPlanUrl)
 
   // Free, instant, no-API-key detection — matches the known marker
@@ -1581,7 +1593,11 @@ export default function SurveyEditor() {
                   <DeviceIcon dtype={item.dtype} color={item.color} size={16} />
                 </div>
                 <span style={{ fontSize: 12.5, color: '#333', flex: 1 }}>{item.label}</span>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#1a1a18' }}>{item.count}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#1a1a18', marginRight: 2 }}>{item.count}</span>
+                <input type="color" value={item.color} disabled={isShared}
+                  onChange={e => recolorDeviceType(item.dtype, e.target.value)}
+                  title={`Change the color of all ${item.count} ${item.label} device${item.count === 1 ? '' : 's'} on this map`}
+                  style={{ width: 20, height: 20, padding: 0, border: '0.5px solid #ccc', borderRadius: 4, cursor: isShared ? 'default' : 'pointer', flexShrink: 0 }} />
               </div>
             ))}
           </div>
