@@ -12,6 +12,7 @@ import {
   getEnterprises, createEnterprise, renameEnterprise, deleteEnterprise, setProjectEnterprise,
 } from '../lib/supabase'
 import { geocodeAddress } from '../lib/geocode'
+import { DEVICE_DEFS } from '../lib/devices'
 
 export default function Dashboard() {
   const { user, isAdmin } = useAuth()
@@ -513,6 +514,20 @@ export default function Dashboard() {
               const projectSurveys = surveys.filter(s => s.project_id === project.id)
               const isOpen = expanded[project.id]
               const isMine = project.user_id === user.id
+
+              // Equipment counts across every survey in this project —
+              // "Cameras" covers every camera dtype in that palette
+              // section (Reolink Fisheye, Dome, Bullet); "Gateways" is
+              // just rak-gw specifically (RAK Node is a different,
+              // non-gateway device and isn't counted here).
+              const cameraDtypes = DEVICE_DEFS.find(s => s.section === 'Cameras')?.items.map(i => i.dtype) || []
+              let cameraCount = 0, gatewayCount = 0
+              for (const s of projectSurveys) {
+                for (const d of (Array.isArray(s.devices) ? s.devices : [])) {
+                  if (cameraDtypes.includes(d.dtype)) cameraCount++
+                  else if (d.dtype === 'rak-gw') gatewayCount++
+                }
+              }
               return (
                 <div key={project.id} style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', cursor: 'pointer', background: '#f8f8f6' }}
@@ -570,6 +585,20 @@ export default function Dashboard() {
                       </select>
                     )}
                     <span style={{ fontSize: 11, color: '#888' }}>{projectSurveys.length} survey{projectSurveys.length !== 1 ? 's' : ''}</span>
+                    {(gatewayCount > 0 || cameraCount > 0) && (
+                      <span style={{ display: 'flex', gap: 8, fontSize: 11, color: '#888' }}>
+                        {gatewayCount > 0 && (
+                          <span title="RAK Gateways across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <i className="ti ti-antenna-bars-5" style={{ fontSize: 12, color: '#3B6D11' }} />{gatewayCount}
+                          </span>
+                        )}
+                        {cameraCount > 0 && (
+                          <span title="Cameras (Reolink Fisheye, Dome, Bullet) across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <i className="ti ti-camera" style={{ fontSize: 12, color: '#378ADD' }} />{cameraCount}
+                          </span>
+                        )}
+                      </span>
+                    )}
                     <button onClick={e => { e.stopPropagation(); triggerFloorPlanUpload(project) }}
                       disabled={uploadingPlanFor === project.id}
                       style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
