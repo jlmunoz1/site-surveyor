@@ -586,15 +586,17 @@ export default function Dashboard() {
                     )}
                     <span style={{ fontSize: 11, color: '#888' }}>{projectSurveys.length} survey{projectSurveys.length !== 1 ? 's' : ''}</span>
                     {(gatewayCount > 0 || cameraCount > 0) && (
-                      <span style={{ display: 'flex', gap: 8, fontSize: 11, color: '#888' }}>
+                      <span style={{ display: 'flex', gap: 10, fontSize: 11, color: '#888' }}>
                         {gatewayCount > 0 && (
-                          <span title="RAK Gateways across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                            <i className="ti ti-antenna-bars-5" style={{ fontSize: 12, color: '#3B6D11' }} />{gatewayCount}
+                          <span title="RAK Gateways across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <i className="ti ti-antenna-bars-5" style={{ fontSize: 12, color: '#3B6D11' }} />
+                            <strong style={{ color: '#1a1a18' }}>{gatewayCount}</strong> RAK Gateway{gatewayCount !== 1 ? 's' : ''}
                           </span>
                         )}
                         {cameraCount > 0 && (
-                          <span title="Cameras (Reolink Fisheye, Dome, Bullet) across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                            <i className="ti ti-camera" style={{ fontSize: 12, color: '#378ADD' }} />{cameraCount}
+                          <span title="Cameras (Reolink Fisheye, Dome, Bullet) across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <i className="ti ti-camera" style={{ fontSize: 12, color: '#378ADD' }} />
+                            <strong style={{ color: '#1a1a18' }}>{cameraCount}</strong> Camera{cameraCount !== 1 ? 's' : ''}
                           </span>
                         )}
                       </span>
