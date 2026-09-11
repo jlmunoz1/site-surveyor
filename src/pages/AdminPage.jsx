@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { getProfiles, getSurveys, getProjects, getEnterprises, renameEnterprise, deleteEnterprise, mergeEnterprises, setUserAdmin, setUserContractor, setUserAccessExpiration, sendPasswordReset, signOut } from '../lib/supabase'
+import { getProfiles, getSurveys, getProjects, getEnterprises, renameEnterprise, deleteEnterprise, mergeEnterprises, setUserAdmin, setUserContractor, setUserAccessExpiration, sendPasswordReset, signOut, adminCreateUser, adminDeleteUser, adminListOrphans, supabase } from '../lib/supabase'
 
 export default function AdminPage() {
   const { user } = useAuth()
@@ -28,7 +28,45 @@ export default function AdminPage() {
   const [entNameInput, setEntNameInput] = useState('')
   const [mergeTarget, setMergeTarget] = useState({}) // enterpriseId -> chosen target id
 
-  useEffect(() => { loadAll(); loadEnterprises() }, [])
+  // Direct admin-side user creation — bypasses the trigger-based
+  // signup flow entirely; role is chosen explicitly here rather than
+  // inferred from project_members at signup time.
+  const [showCreateUser, setShowCreateUser] = useState(false)
+  const [newEmail, setNewEmail] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newRole, setNewRole] = useState('staff')
+  const [newProjectIds, setNewProjectIds] = useState([])
+  const [creatingUser, setCreatingUser] = useState(false)
+  const [createUserError, setCreateUserError] = useState('')
+  const [createUserMsg, setCreateUserMsg] = useState('')
+
+  // Orphaned accounts — real auth.users rows with no matching
+  // profiles row, invisible in the Users table above (which is driven
+  // by profiles) even though they're sitting in the database. Surfaces
+  // the mismatch so it can be reconciled instead of silently ignored.
+  const [orphans, setOrphans] = useState([])
+  const [orphansLoading, setOrphansLoading] = useState(true)
+  const [orphansError, setOrphansError] = useState('')
+  const [orphanBusyId, setOrphanBusyId] = useState(null)
+  const [fixingOrphan, setFixingOrphan] = useState(null) // orphan object currently choosing a role for
+  const [fixRole, setFixRole] = useState('staff')
+
+  useEffect(() => { loadAll(); loadEnterprises(); loadOrphans() }, [])
+
+  async function getAccessToken() {
+    const { data: { session } } = await supabase.auth.getSession()
+    return session?.access_token || null
+  }
+
+  async function loadOrphans() {
+    setOrphansLoading(true)
+    const accessToken = await getAccessToken()
+    if (!accessToken) { setOrphansLoading(false); return }
+    const { data, error } = await adminListOrphans({ accessToken })
+    if (error) setOrphansError(error)
+    else setOrphans(data?.orphans || [])
+    setOrphansLoading(false)
+  }
 
   async function loadEnterprises() {
     setEntLoading(true)
@@ -81,6 +119,67 @@ export default function AdminPage() {
     if (error) setError(error.message)
     else setUsers(list => list.map(x => x.id === u.id ? { ...x, is_contractor: !x.is_contractor } : x))
     setBusyId(null)
+  }
+
+  function toggleNewProjectId(id) {
+    setNewProjectIds(list => list.includes(id) ? list.filter(x => x !== id) : [...list, id])
+  }
+
+  async function handleCreateUser(e) {
+    e.preventDefault()
+    if (!newEmail.trim()) return
+    setCreatingUser(true); setCreateUserError(''); setCreateUserMsg('')
+    const accessToken = await getAccessToken()
+    const { data, error } = await adminCreateUser({
+      accessToken,
+      email: newEmail.trim(),
+      fullName: newName.trim() || null,
+      role: newRole,
+      projectIds: newRole === 'contractor' ? newProjectIds : [],
+    })
+    setCreatingUser(false)
+    if (error) { setCreateUserError(error); return }
+    setCreateUserMsg(data?.warning || `Created — invite email sent to ${newEmail.trim()}`)
+    setNewEmail(''); setNewName(''); setNewRole('staff'); setNewProjectIds([])
+    loadAll()
+    setTimeout(() => setCreateUserMsg(''), 6000)
+  }
+
+  async function handleDeleteUser(u) {
+    if (!window.confirm(`Permanently delete ${u.email}? This removes their account entirely and can't be undone.`)) return
+    setBusyId(u.id)
+    const accessToken = await getAccessToken()
+    const { error } = await adminDeleteUser({ accessToken, targetUserId: u.id })
+    setBusyId(null)
+    if (error) { setError(error); return }
+    setUsers(list => list.filter(x => x.id !== u.id))
+  }
+
+  async function handleDeleteOrphan(o) {
+    if (!window.confirm(`Permanently delete this account (${o.email})? This can't be undone.`)) return
+    setOrphanBusyId(o.id)
+    const accessToken = await getAccessToken()
+    const { error } = await adminDeleteUser({ accessToken, targetUserId: o.id })
+    setOrphanBusyId(null)
+    if (error) { setOrphansError(error); return }
+    setOrphans(list => list.filter(x => x.id !== o.id))
+  }
+
+  async function handleFixOrphan(o) {
+    setOrphanBusyId(o.id)
+    const accessToken = await getAccessToken()
+    const { error } = await adminCreateUser({
+      accessToken,
+      email: o.email,
+      fullName: null,
+      role: fixRole,
+      targetUserId: o.id,
+    })
+    setOrphanBusyId(null)
+    if (error) { setOrphansError(error); return }
+    setOrphans(list => list.filter(x => x.id !== o.id))
+    setFixingOrphan(null)
+    loadAll()
   }
 
   function daysFromNow(days) {
@@ -173,9 +272,53 @@ export default function AdminPage() {
 
       <div style={{ maxWidth: 1060, margin: '0 auto', padding: '32px 24px' }}>
         <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a18', margin: '0 0 4px' }}>Registered users</h1>
-        <p style={{ fontSize: 13, color: '#888', margin: '0 0 24px' }}>
-          {users.length} account{users.length !== 1 ? 's' : ''} — staff and contractors who have signed up.
-        </p>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+          <p style={{ fontSize: 13, color: '#888', margin: 0 }}>
+            {users.length} account{users.length !== 1 ? 's' : ''} — staff and contractors who have signed up.
+          </p>
+          <button onClick={() => setShowCreateUser(v => !v)} style={{ ...ghostBtn, color: '#378ADD', borderColor: '#AFCFF0' }}>
+            {showCreateUser ? 'Cancel' : '+ Add user'}
+          </button>
+        </div>
+
+        {showCreateUser && (
+          <form onSubmit={handleCreateUser} style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+              <input type="email" required placeholder="email@company.com" value={newEmail} onChange={e => setNewEmail(e.target.value)}
+                style={{ flex: '1 1 220px', fontSize: 13, padding: '7px 10px', border: '0.5px solid #ccc', borderRadius: 6 }} />
+              <input placeholder="Full name (optional)" value={newName} onChange={e => setNewName(e.target.value)}
+                style={{ flex: '1 1 180px', fontSize: 13, padding: '7px 10px', border: '0.5px solid #ccc', borderRadius: 6 }} />
+              <select value={newRole} onChange={e => setNewRole(e.target.value)}
+                style={{ fontSize: 13, padding: '7px 10px', border: '0.5px solid #ccc', borderRadius: 6 }}>
+                <option value="staff">Internal staff (full org access)</option>
+                <option value="contractor">Contractor (scoped)</option>
+              </select>
+            </div>
+            {newRole === 'contractor' && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>Grant access to project(s) right away (optional — can also invite from Dashboard later):</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {projects.map(p => (
+                    <button type="button" key={p.id} onClick={() => toggleNewProjectId(p.id)}
+                      style={{
+                        fontSize: 11, padding: '4px 9px', borderRadius: 12, cursor: 'pointer',
+                        border: newProjectIds.includes(p.id) ? '0.5px solid #378ADD' : '0.5px solid #ccc',
+                        background: newProjectIds.includes(p.id) ? '#E9F2FC' : '#fff',
+                        color: newProjectIds.includes(p.id) ? '#378ADD' : '#666',
+                      }}>
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {createUserError && <p style={{ fontSize: 12, color: '#A32D2D', margin: '0 0 10px' }}>{createUserError}</p>}
+            {createUserMsg && <p style={{ fontSize: 12, color: '#1D9E75', margin: '0 0 10px' }}>{createUserMsg}</p>}
+            <button type="submit" disabled={creatingUser} style={{ ...ghostBtn, color: '#fff', background: '#378ADD', borderColor: '#378ADD' }}>
+              {creatingUser ? 'Creating…' : 'Create & send invite'}
+            </button>
+          </form>
+        )}
 
         {error && <p style={{ fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{error}</p>}
 
@@ -183,7 +326,7 @@ export default function AdminPage() {
           <div style={{ textAlign: 'center', padding: 48, color: '#888', fontSize: 13 }}>Loading…</div>
         ) : (
           <div style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px 40px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
               <span>Name</span>
               <span>Email</span>
               <span>Joined</span>
@@ -193,6 +336,7 @@ export default function AdminPage() {
               <span>Scope</span>
               <span>Access</span>
               <span>Password</span>
+              <span></span>
             </div>
             {users.map(u => {
               const status = resetStatus[u.id]
@@ -202,7 +346,7 @@ export default function AdminPage() {
               const exp = u.access_expires_at ? new Date(u.access_expires_at) : null
               const isExpired = exp && exp <= new Date()
               return (
-                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px 40px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
                   <span style={{ color: '#1a1a18', fontWeight: 500 }}>
                     {u.full_name || '—'}{u.id === user.id && <span style={{ color: '#888', fontWeight: 400 }}> (you)</span>}
                   </span>
@@ -271,10 +415,54 @@ export default function AdminPage() {
                   >
                     {isSending ? 'Sending…' : isSent ? 'Email sent ✓' : isErr ? 'Failed — retry' : 'Reset password'}
                   </button>
+                  <button onClick={() => handleDeleteUser(u)} disabled={u.id === user.id || busyId === u.id}
+                    title={u.id === user.id ? "You can't delete your own account here" : 'Delete this account permanently'}
+                    style={{ background: 'none', border: 'none', cursor: u.id === user.id ? 'default' : 'pointer', color: '#ccc', fontSize: 14, padding: '2px 4px', opacity: u.id === user.id ? 0.4 : 1 }}>
+                    <i className="ti ti-trash" />
+                  </button>
                 </div>
               )
             })}
           </div>
+        )}
+
+        {!orphansLoading && orphans.length > 0 && (
+          <>
+            <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a18', margin: '40px 0 4px' }}>Orphaned accounts</h1>
+            <p style={{ fontSize: 13, color: '#888', margin: '0 0 16px' }}>
+              These are real accounts in the database with no matching profile — invisible in the Users table above.
+              Usually left over from a broken signup. Finish setting them up (pick a role) or delete them.
+            </p>
+            {orphansError && <p style={{ fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{orphansError}</p>}
+            <div style={{ background: '#FFF7E6', border: '0.5px solid #F0D488', borderRadius: 10, overflow: 'hidden' }}>
+              {orphans.map(o => (
+                <div key={o.id} style={{ padding: '10px 16px', borderBottom: '0.5px solid #F0E0A0' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                    <span style={{ flex: 1, color: '#1a1a18' }}>{o.email}</span>
+                    <span style={{ fontSize: 11, color: '#8A6C1F' }}>
+                      Created {o.created_at ? new Date(o.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                      {o.last_sign_in_at ? ' · has logged in' : ' · never logged in'}
+                    </span>
+                    {fixingOrphan?.id === o.id ? (
+                      <>
+                        <select value={fixRole} onChange={e => setFixRole(e.target.value)} style={{ fontSize: 11, padding: '4px 6px', borderRadius: 4, border: '0.5px solid #ccc' }}>
+                          <option value="staff">Staff</option>
+                          <option value="contractor">Contractor</option>
+                        </select>
+                        <button onClick={() => handleFixOrphan(o)} disabled={orphanBusyId === o.id} style={{ ...tinyBtn, color: '#1D9E75', borderColor: '#9AD9BE' }}>Confirm</button>
+                        <button onClick={() => setFixingOrphan(null)} style={tinyBtn}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => { setFixingOrphan(o); setFixRole('staff') }} disabled={orphanBusyId === o.id} style={{ ...tinyBtn, color: '#378ADD', borderColor: '#AFCFF0' }}>Create profile</button>
+                        <button onClick={() => handleDeleteOrphan(o)} disabled={orphanBusyId === o.id} style={{ ...tinyBtn, color: '#A32D2D', borderColor: '#F09595' }}>Delete</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
 
         <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a18', margin: '40px 0 4px' }}>Enterprises</h1>

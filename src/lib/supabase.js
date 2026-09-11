@@ -389,6 +389,38 @@ export async function setUserContractor(id, isContractor) {
   return supabase.from('profiles').update({ is_contractor: isContractor }).eq('id', id)
 }
 
+// Admin-side user management — creates/deletes accounts directly and
+// reconciles the profiles-driven Users list against what's actually
+// in auth.users, bypassing the fragile signup-trigger path entirely.
+// All three verify the caller is a real admin server-side; accessToken
+// comes from supabase.auth.getSession().
+async function callAdminUserApi(path, body) {
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json()
+    if (!res.ok) return { data: null, error: data.error || 'Request failed' }
+    return { data, error: null }
+  } catch (err) {
+    return { data: null, error: err.message || 'Failed to reach server' }
+  }
+}
+
+export async function adminCreateUser({ accessToken, email, fullName, role, projectIds, targetUserId }) {
+  return callAdminUserApi('/api/admin-create-user', { accessToken, email, fullName, role, projectIds, targetUserId })
+}
+
+export async function adminDeleteUser({ accessToken, targetUserId }) {
+  return callAdminUserApi('/api/admin-delete-user', { accessToken, targetUserId })
+}
+
+export async function adminListOrphans({ accessToken }) {
+  return callAdminUserApi('/api/admin-list-orphans', { accessToken })
+}
+
 export async function setUserAccessExpiration(id, expiresAt) {
   return supabase.from('profiles').update({ access_expires_at: expiresAt }).eq('id', id)
 }
