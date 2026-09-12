@@ -350,6 +350,10 @@ export async function getMyProfile(userId) {
   return supabase.from('profiles').select('*').eq('id', userId).single()
 }
 
+export async function updateMyName(userId, fullName) {
+  return supabase.from('profiles').update({ full_name: fullName }).eq('id', userId)
+}
+
 // Self-heal fallback for a missing profiles row — see api/ensure-profile.js
 // for why this exists. Only ever called after getMyProfile() comes back
 // empty for the currently logged-in user.
