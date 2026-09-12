@@ -58,6 +58,7 @@ module.exports = async function handler(req, res) {
       // Normal path — create a brand new account and email them a
       // "set your password" link through the configured SMTP.
       const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(cleanEmail, {
+        redirectTo: 'https://cabldex.com/reset-password',
         data: fullName ? { full_name: fullName } : undefined,
       })
       if (inviteError) {

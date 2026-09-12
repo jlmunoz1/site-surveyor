@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const admin = createClient(SITE_SURVEYOR_URL, serviceKey)
-    const redirectTo = `https://site-surveyor.vercel.app/reset-password`
+    const redirectTo = `https://cabldex.com/reset-password`
     const { error } = await admin.auth.admin.inviteUserByEmail(email.trim().toLowerCase(), {
       redirectTo,
       data: projectName ? { invited_to_project: projectName } : undefined,

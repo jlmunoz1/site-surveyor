@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { getSurvey, getProject, saveSurvey } from '../lib/supabase'
+import { getSurvey, getProject, getSurveys, saveSurvey } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { fitGeoTransform, computeCorners, estimateScale } from '../lib/geo'
 import { rotatedImageOverlay } from '../lib/RotatedImageOverlay'
@@ -412,6 +412,8 @@ export default function GeoReference() {
     window.addEventListener('touchend', onUp)
   }
 
+  const [applyingToProject, setApplyingToProject] = useState(false)
+
   const handleSave = useCallback(async () => {
     setSaving(true)
     const payload = { geo_points: points, geo_corners: corners || null, geo_opacity: opacity }
@@ -419,7 +421,28 @@ export default function GeoReference() {
     setSaving(false)
     if (saveFailure) { setError('Save failed: ' + saveFailure.message); return }
     setSaveMsg('Saved'); setTimeout(() => setSaveMsg(''), 2000)
-  }, [id, points, corners, opacity, user])
+
+    // Other floors of the same building almost always share the exact
+    // same real-world footprint, so re-aligning ground control points
+    // floor by floor is usually redundant — offer to copy this
+    // alignment onto every other survey in the project in one go.
+    if (survey?.project_id) {
+      const { data: allSurveys } = await getSurveys()
+      const siblings = (allSurveys || []).filter(s => s.project_id === survey.project_id && s.id !== id)
+      if (siblings.length && window.confirm(
+        `Apply this same georeference to the other ${siblings.length} floor plan${siblings.length !== 1 ? 's' : ''} in this project? This overwrites any georeferencing already set on them.`
+      )) {
+        setApplyingToProject(true)
+        const results = await Promise.all(siblings.map(s => saveSurvey(s.id, payload, { updatedBy: user?.id })))
+        setApplyingToProject(false)
+        const failures = results.filter(r => r.error).length
+        setSaveMsg(failures
+          ? `Applied to ${siblings.length - failures} of ${siblings.length} other floors — ${failures} failed`
+          : `Saved — applied to all ${siblings.length + 1} floor plans in this project`)
+        setTimeout(() => setSaveMsg(''), 4000)
+      }
+    }
+  }, [id, points, corners, opacity, user, survey])
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 14, color: '#888' }}>Loading…</div>
   if (error) {
@@ -463,8 +486,8 @@ export default function GeoReference() {
         <span style={{ fontSize: 11, color: '#888' }}>
           {points.length} point{points.length !== 1 ? 's' : ''}{transform ? ` · ${points.length >= 3 ? 'affine' : 'similarity'} fit` : ' · need 2+ to preview'}
         </span>
-        <button onClick={handleSave} disabled={saving} style={primaryBtn}>
-          <i className="ti ti-device-floppy" /> {saving ? 'Saving…' : (saveMsg || 'Save')}
+        <button onClick={handleSave} disabled={saving || applyingToProject} style={primaryBtn}>
+          <i className="ti ti-device-floppy" /> {applyingToProject ? 'Applying to other floors…' : saving ? 'Saving…' : (saveMsg || 'Save')}
         </button>
       </div>
 
