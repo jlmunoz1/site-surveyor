@@ -19,6 +19,13 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   measuring = false,
   onCalibrateDrag,
   readOnly = false,
+  // Touch-friendly alternative to native drag-and-drop from the device
+  // palette (which has no reliable touch support in mobile browsers).
+  // When set, the next tap on the canvas places a device of this type;
+  // onArmedDevicePlaced fires once it's placed so the parent can clear
+  // the armed state.
+  armedDevice = null,
+  onArmedDevicePlaced,
   // Fired once the floor plan (if any) has finished loading and been
   // drawn — or immediately if there's no floor plan at all. Used by
   // the bulk PDF export flow to know exactly when it's safe to
@@ -54,6 +61,14 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   }, [measuring])
   const zoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
+
+  // Multi-touch pinch-to-zoom — Pointer Events fire one event stream
+  // per finger (each with its own pointerId), so a pinch gesture has
+  // to be assembled by hand from two simultaneously-active pointers
+  // rather than arriving as a single ready-made "pinch" event the way
+  // wheel-based trackpad zoom does.
+  const activePointers = useRef(new Map()) // pointerId -> {x, y}
+  const pinchStart = useRef(null) // { dist, zoom, pan, midX, midY } captured when the 2nd finger touches down
 
   // Exposes the floor plan's current on-screen bounding box (relative
   // to the wrapper), so the parent can crop an export capture to just
@@ -424,7 +439,32 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  function handleWrapMouseDown(e) {
+  function handleWrapPointerDown(e) {
+    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    // Second finger touching down starts a pinch — capture the
+    // starting distance/zoom/pan so subsequent moves can scale
+    // relative to this baseline, and bail out of every other
+    // single-pointer interaction (panning, drawing, measuring, etc.)
+    // for the duration of the gesture.
+    if (activePointers.current.size === 2) {
+      isPanning.current = false
+      isCalibratingDrag.current = false
+      isMeasuringDrag.current = false
+      const pts = Array.from(activePointers.current.values())
+      const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+      const rect = wrapRef.current.getBoundingClientRect()
+      pinchStart.current = {
+        dist: dist || 1,
+        zoom: zoomRef.current,
+        pan: { ...panRef.current },
+        midX: (pts[0].x + pts[1].x) / 2 - rect.left,
+        midY: (pts[0].y + pts[1].y) / 2 - rect.top,
+      }
+      return
+    }
+    if (activePointers.current.size > 2) return // ignore a 3rd+ finger entirely
+
     if (e.target.closest('.sv-device')) return
 
     // Read-only (shared link) view — allow panning/zooming to look
@@ -451,8 +491,9 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
 
     // Click-and-hold to pan: middle-click or Alt+click always pans.
     // In select mode (the grab-hand cursor), a plain left-click-and-hold
-    // on empty canvas also pans — mouseup below decides whether it ended
-    // up being a real drag (pan) or just a click (deselect).
+    // on empty canvas also pans — pointerup below decides whether it ended
+    // up being a real drag (pan), a tap to place an armed device, or
+    // just a click (deselect).
     const wantsPan = e.button === 1 || (e.button === 0 && e.altKey) || (e.button === 0 && mode === 'select')
     if (wantsPan) {
       e.preventDefault()
@@ -499,7 +540,40 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     }
   }
 
-  function handleWrapMouseMove(e) {
+  function handleWrapPointerMove(e) {
+    if (activePointers.current.has(e.pointerId)) {
+      activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    }
+
+    if (activePointers.current.size === 2 && pinchStart.current) {
+      const pts = Array.from(activePointers.current.values())
+      const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) || 1
+      const rect = wrapRef.current.getBoundingClientRect()
+      const midX = (pts[0].x + pts[1].x) / 2 - rect.left
+      const midY = (pts[0].y + pts[1].y) / 2 - rect.top
+      const base = baseZoomRef.current || 1
+      const scale = dist / pinchStart.current.dist
+      const newZoom = Math.min(Math.max(pinchStart.current.zoom * scale, base), 8)
+      // Zoom anchored at the pinch's starting midpoint, then carry any
+      // subsequent two-finger drag as a pan on top of that — matches
+      // how pinch-zoom feels in native apps (zoom and pan together in
+      // one continuous gesture rather than as two separate steps).
+      const zoomedPan = {
+        x: pinchStart.current.midX - (pinchStart.current.midX - pinchStart.current.pan.x) * (newZoom / pinchStart.current.zoom),
+        y: pinchStart.current.midY - (pinchStart.current.midY - pinchStart.current.pan.y) * (newZoom / pinchStart.current.zoom),
+      }
+      const newPan = {
+        x: zoomedPan.x + (midX - pinchStart.current.midX),
+        y: zoomedPan.y + (midY - pinchStart.current.midY),
+      }
+      zoomRef.current = newZoom
+      panRef.current = newPan
+      setZoom(newZoom)
+      setPan(newPan)
+      return
+    }
+    if (activePointers.current.size >= 2) return // 3rd+ finger — ignore until back down to a single pointer
+
     if (isCalibratingDrag.current) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
       setCalibDrag({ x1: calibStartRef.current.x, y1: calibStartRef.current.y, x2: x, y2: y })
@@ -540,7 +614,11 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     }
   }
 
-  function handleWrapMouseUp(e) {
+  function handleWrapPointerUp(e) {
+    activePointers.current.delete(e.pointerId)
+    if (activePointers.current.size < 2) pinchStart.current = null
+    if (activePointers.current.size >= 1) return // still mid-pinch or a finger still down — nothing else to resolve yet
+
     if (isMeasuringDrag.current) {
       isMeasuringDrag.current = false
       // Leave the line + reading on screen so it can actually be read;
@@ -558,15 +636,22 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     if (isPanning.current) {
       isPanning.current = false
       // In select mode, a click-and-hold that never actually moved is
-      // just a click on empty space — deselect, same as before. If it
-      // moved, it was a real pan drag, so leave the current selection
-      // (if any) alone.
+      // just a tap on empty space — either place an armed device
+      // (touch-friendly alternative to dragging from the sidebar) or,
+      // with nothing armed, deselect same as before. If it moved, it
+      // was a real pan drag, so leave the current selection alone.
       if (mode === 'select') {
         const dx = e.clientX - panStart.current.x
         const dy = e.clientY - panStart.current.y
         if (Math.hypot(dx, dy) < 4) {
-          onDeviceSelect(null)
-          onCableSelect(null)
+          if (armedDevice && !readOnly) {
+            const { x, y } = toCanvas(e.clientX, e.clientY)
+            onDeviceAdd({ ...armedDevice, x: x - 19, y: y - 19, hmRangeFt: 120, hmStrength: 0.75 })
+            if (onArmedDevicePlaced) onArmedDevicePlaced()
+          } else {
+            onDeviceSelect(null)
+            onCableSelect(null)
+          }
         }
       }
       return
@@ -580,7 +665,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     setDrawingCable(null)
   }
 
-  function handleDeviceMouseDown(e, device) {
+  function handleDevicePointerDown(e, device) {
     e.stopPropagation()
     if (mode === 'cable') {
       const cx = device.x + 19, cy = device.y + 19
@@ -594,13 +679,18 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     const rect = wrapRef.current.getBoundingClientRect()
     const startX = (e.clientX - rect.left - panRef.current.x) / zoomRef.current - device.x
     const startY = (e.clientY - rect.top - panRef.current.y) / zoomRef.current - device.y
+    // Pointer capture keeps move/up events targeting this element even
+    // as a finger drags outside its original bounds — without it,
+    // touch-dragging a device on mobile loses tracking the moment the
+    // finger moves past the (often small) icon's own hit area.
+    e.target.setPointerCapture?.(e.pointerId)
     function onMove(mv) {
       const x = (mv.clientX - rect.left - panRef.current.x) / zoomRef.current - startX
       const y = (mv.clientY - rect.top - panRef.current.y) / zoomRef.current - startY
       onDeviceMove(device.id, x, y)
     }
-    function onUp() { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
-    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
+    function onUp() { document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); document.removeEventListener('pointercancel', onUp) }
+    document.addEventListener('pointermove', onMove); document.addEventListener('pointerup', onUp); document.addEventListener('pointercancel', onUp)
   }
 
   function handleDrop(e) {
@@ -705,12 +795,18 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         style={{
           width: '100%', height: '100%', position: 'relative', overflow: 'hidden',
           cursor: (calibrating || measuring) ? 'crosshair' : isPanning.current ? 'grabbing' : mode === 'select' ? 'grab' : 'crosshair',
-          background: 'repeating-linear-gradient(0deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px),repeating-linear-gradient(90deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px)'
+          background: 'repeating-linear-gradient(0deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px),repeating-linear-gradient(90deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px)',
+          // Hands touch gestures entirely to our own pan/pinch-zoom
+          // handling — without this, mobile browsers intercept
+          // one/two-finger gestures for native page scroll/zoom before
+          // our pointer handlers ever see them.
+          touchAction: 'none',
         }}
         data-export-canvas="true"
-        onMouseDown={handleWrapMouseDown}
-        onMouseMove={handleWrapMouseMove}
-        onMouseUp={e => handleWrapMouseUp(e)}
+        onPointerDown={handleWrapPointerDown}
+        onPointerMove={handleWrapPointerMove}
+        onPointerUp={handleWrapPointerUp}
+        onPointerCancel={handleWrapPointerUp}
         onDragOver={e => e.preventDefault()}
         onDrop={handleDrop}
       >
@@ -797,7 +893,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
           })}
 
           {devices.map(d => (
-            <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
+            <div key={d.id} className="sv-device" onPointerDown={e => handleDevicePointerDown(e, d)}
               onDoubleClick={e => {
                 // Renaming normally happens via double-clicking the
                 // label text itself — but if this device type's labels
@@ -810,7 +906,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                 const newLabel = prompt('Rename device:', d.label)
                 if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
               }}
-              style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none' }}>
+              style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', touchAction: 'none' }}>
               {(() => {
                 // Detected devices render smaller while awaiting review
                 // — the dashed amber outline + badge already flag them

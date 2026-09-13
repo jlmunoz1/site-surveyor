@@ -111,6 +111,11 @@ export default function SurveyEditor() {
   const [shareUrl, setShareUrl] = useState('')
   const [showScale, setShowScale] = useState(false)
   const [showKey, setShowKey] = useState(false)
+  // Touch-friendly alternative to dragging a device from the sidebar
+  // onto the canvas — native HTML5 drag-and-drop has no reliable touch
+  // support in mobile browsers, so tapping a palette item "arms" it,
+  // and the next tap on the canvas places it there instead.
+  const [armedDevice, setArmedDevice] = useState(null)
   const [scaleInput, setScaleInput] = useState('4')
   const [showBOM, setShowBOM] = useState(false)
   const [portMapperSiteId, setPortMapperSiteId] = useState(null)
@@ -1047,6 +1052,20 @@ export default function SurveyEditor() {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
+        {armedDevice && (
+          <div style={{
+            position: 'fixed', top: 74, left: '50%', transform: 'translateX(-50%)',
+            background: '#1a1a18', color: '#fff', padding: '8px 14px', borderRadius: 20,
+            fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 10, zIndex: 50,
+            boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+          }}>
+            <span>Tap the floor plan to place <strong>{armedDevice.label}</strong></span>
+            <button onClick={() => setArmedDevice(null)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 12, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </div>
+        )}
+
         {!isShared && (
           <div style={{ width: 148, flexShrink: 0, background: '#f8f8f6', borderRight: '0.5px solid #e0dfd8', overflowY: 'auto', padding: 8 }}>
             {DEVICE_DEFS.map(section => (
@@ -1057,9 +1076,17 @@ export default function SurveyEditor() {
                 {section.items.map(item => (
                   <div key={item.dtype} draggable
                     onDragStart={e => e.dataTransfer.setData('app/device', JSON.stringify(item))}
-                    style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 7px', borderRadius: 6, cursor: 'grab', fontSize: 12, color: '#1a1a18', border: '0.5px solid transparent' }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#fff'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    onClick={() => {
+                      setArmedDevice(prev => prev?.dtype === item.dtype ? null : item)
+                      setMode('select')
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7, padding: '5px 7px', borderRadius: 6, cursor: 'grab', fontSize: 12, color: '#1a1a18',
+                      border: armedDevice?.dtype === item.dtype ? '0.5px solid #378ADD' : '0.5px solid transparent',
+                      background: armedDevice?.dtype === item.dtype ? '#E9F2FC' : 'transparent',
+                    }}
+                    onMouseEnter={e => { if (armedDevice?.dtype !== item.dtype) e.currentTarget.style.background = '#fff' }}
+                    onMouseLeave={e => { if (armedDevice?.dtype !== item.dtype) e.currentTarget.style.background = 'transparent' }}
                   >
                     <div style={{ width: 30, height: 30, borderRadius: 6, background: item.color + '20', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <DeviceIcon dtype={item.dtype} color={item.color} size={22} />
@@ -1120,6 +1147,8 @@ export default function SurveyEditor() {
           measuring={measuring}
           onCalibrateDrag={handleCalibrateDrag}
           readOnly={isShared}
+          armedDevice={armedDevice}
+          onArmedDevicePlaced={() => setArmedDevice(null)}
         />
 
         <div style={{ width: 172, flexShrink: 0, background: '#f8f8f6', borderLeft: '0.5px solid #e0dfd8', padding: 12, overflowY: 'auto' }}>
