@@ -116,6 +116,19 @@ export default function SurveyEditor() {
   // support in mobile browsers, so tapping a palette item "arms" it,
   // and the next tap on the canvas places it there instead.
   const [armedDevice, setArmedDevice] = useState(null)
+
+  // Mobile layout — narrow viewports get a compact top bar (full
+  // toolbar tucked into a collapsible drawer), a bottom device strip
+  // instead of the left sidebar, and Properties as a slide-up sheet
+  // instead of a permanent right column. Desktop layout is completely
+  // untouched below isMobile checks.
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 820)
+  const [showMobileMenu, setShowMobileMenu] = useState(false)
+  useEffect(() => {
+    function onResize() { setIsMobile(window.innerWidth < 820) }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   const [scaleInput, setScaleInput] = useState('4')
   const [showBOM, setShowBOM] = useState(false)
   const [portMapperSiteId, setPortMapperSiteId] = useState(null)
@@ -771,9 +784,30 @@ export default function SurveyEditor() {
   if (error) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 14, color: '#A32D2D' }}>{error}</div>
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#fff', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#fff', fontFamily: 'system-ui, sans-serif', position: 'relative' }}>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', flexShrink: 0, flexWrap: 'wrap' }}>
+      {isMobile && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', flexShrink: 0, zIndex: 41, position: 'relative' }}>
+          <button onClick={() => navigate('/dashboard')} style={ghostBtn}><i className="ti ti-arrow-left" /></button>
+          <span style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#1a1a18' }}>
+            {survey?.name}
+          </span>
+          {!isShared && (
+            <button onClick={handleSaveNow} disabled={saving} style={{ ...tbBtn, padding: '6px 9px' }} title="Save immediately">
+              <i className="ti ti-device-floppy" />
+            </button>
+          )}
+          <button onClick={() => setShowMobileMenu(v => !v)} style={{ ...tbBtn, padding: '6px 9px', ...(showMobileMenu ? activeTbBtn : {}) }} title="Tools">
+            <i className={`ti ti-${showMobileMenu ? 'x' : 'menu-2'}`} />
+          </button>
+        </div>
+      )}
+
+      <div style={{
+        display: (isMobile && !showMobileMenu) ? 'none' : 'flex',
+        alignItems: 'center', gap: 6, padding: '7px 12px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', flexShrink: 0, flexWrap: 'wrap',
+        ...(isMobile ? { position: 'absolute', top: 46, left: 0, right: 0, zIndex: 40, maxHeight: '75vh', overflowY: 'auto', boxShadow: '0 6px 16px rgba(0,0,0,0.18)' } : {}),
+      }}>
         <button onClick={() => navigate('/dashboard')} style={ghostBtn}>
           <i className="ti ti-arrow-left" /> Dashboard
         </button>
@@ -836,7 +870,7 @@ export default function SurveyEditor() {
         )}
 
         {toolbarModes.map(m => (
-          <button key={m.id} style={{ ...tbBtn, ...(mode === m.id ? activeTbBtn : {}) }} onClick={() => setMode(m.id)}>
+          <button key={m.id} style={{ ...tbBtn, ...(mode === m.id ? activeTbBtn : {}) }} onClick={() => { setMode(m.id); if (isMobile) setShowMobileMenu(false) }}>
             <i className={`ti ti-${m.icon}`} /> {m.label}
           </button>
         ))}
@@ -1050,7 +1084,7 @@ export default function SurveyEditor() {
         </div>
       )}
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flex: 1, overflow: 'hidden' }}>
 
         {armedDevice && (
           <div style={{
@@ -1066,7 +1100,7 @@ export default function SurveyEditor() {
           </div>
         )}
 
-        {!isShared && (
+        {!isShared && !isMobile && (
           <div style={{ width: 148, flexShrink: 0, background: '#f8f8f6', borderRight: '0.5px solid #e0dfd8', overflowY: 'auto', padding: 8 }}>
             {DEVICE_DEFS.map(section => (
               <div key={section.section} style={{ marginBottom: 12 }}>
@@ -1151,8 +1185,47 @@ export default function SurveyEditor() {
           onArmedDevicePlaced={() => setArmedDevice(null)}
         />
 
-        <div style={{ width: 172, flexShrink: 0, background: '#f8f8f6', borderLeft: '0.5px solid #e0dfd8', padding: 12, overflowY: 'auto' }}>
-          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 10, color: '#1a1a18' }}>Properties</div>
+        {!isShared && isMobile && (
+          <div style={{
+            display: 'flex', overflowX: 'auto', gap: 6, padding: '8px 10px',
+            background: '#f8f8f6', borderTop: '0.5px solid #e0dfd8', flexShrink: 0,
+            WebkitOverflowScrolling: 'touch',
+          }}>
+            {DEVICE_DEFS.flatMap(section => section.items).map(item => (
+              <button key={item.dtype}
+                onClick={() => { setArmedDevice(prev => prev?.dtype === item.dtype ? null : item); setMode('select') }}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flexShrink: 0,
+                  padding: '4px 7px', borderRadius: 8, cursor: 'pointer',
+                  border: armedDevice?.dtype === item.dtype ? '1.5px solid #378ADD' : '0.5px solid transparent',
+                  background: armedDevice?.dtype === item.dtype ? '#E9F2FC' : 'transparent',
+                }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: item.color + '20', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <DeviceIcon dtype={item.dtype} color={item.color} size={20} />
+                </div>
+                <span style={{ fontSize: 8.5, color: '#666', whiteSpace: 'nowrap' }}>
+                  {item.label.replace('RAK ', '').replace(' Camera', '').replace('Access Point', 'AP')}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div style={isMobile ? {
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 45,
+          maxHeight: '55vh', overflowY: 'auto', background: '#f8f8f6',
+          borderTop: '0.5px solid #e0dfd8', padding: 12,
+          boxShadow: '0 -6px 16px rgba(0,0,0,0.18)',
+          display: (selectedDevice || selectedCable) ? 'block' : 'none',
+        } : { width: 172, flexShrink: 0, background: '#f8f8f6', borderLeft: '0.5px solid #e0dfd8', padding: 12, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: '#1a1a18', flex: 1 }}>Properties</div>
+            {isMobile && (
+              <button onClick={() => { handleDeviceSelect(null); handleCableSelect(null) }} style={{ background: 'none', border: 'none', color: '#888', padding: 4, cursor: 'pointer' }}>
+                <i className="ti ti-x" style={{ fontSize: 16 }} />
+              </button>
+            )}
+          </div>
 
           {!selectedDevice && !selectedCable && (
             <p style={{ fontSize: 12, color: '#888' }}>Select a device or cable.</p>
