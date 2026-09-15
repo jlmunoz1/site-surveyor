@@ -51,14 +51,35 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   const isCalibratingDrag = useRef(false)
   const calibStartRef = useRef({ x: 0, y: 0 })
   const [calibDrag, setCalibDrag] = useState(null) // { x1, y1, x2, y2 } while actively dragging
-  const isMeasuringDrag = useRef(false)
-  const measureStartRef = useRef({ x: 0, y: 0 })
-  const [measureLine, setMeasureLine] = useState(null) // { x1, y1, x2, y2, distFt } — persists after mouseup so it can be read
+  // Multi-point measuring — click to plot a point, double-click (or
+  // Escape) to finish. Distance is the sum of every segment along the
+  // path, which is what actually matters for tracing a cable pathway
+  // around corners rather than a single point-to-point straight line.
+  const [measurePoints, setMeasurePoints] = useState([]) // finalized points: [{x,y}, ...]
+  const [measureCursor, setMeasureCursor] = useState(null) // live position for the rubber-band preview to the next click
+  const [measureFinished, setMeasureFinished] = useState(false)
 
-  // Clear the measurement line whenever the tool is switched off
+  // Clear the measurement whenever the tool is switched off
   useEffect(() => {
-    if (!measuring) setMeasureLine(null)
+    if (!measuring) { setMeasurePoints([]); setMeasureCursor(null); setMeasureFinished(false) }
   }, [measuring])
+
+  function measureTotalFt() {
+    const pts = (!measureFinished && measureCursor) ? [...measurePoints, measureCursor] : measurePoints
+    let totalPx = 0
+    for (let i = 1; i < pts.length; i++) totalPx += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+    return pxPerFt > 0 ? totalPx / pxPerFt : 0
+  }
+
+  // Escape finishes an in-progress measurement, same as double-click
+  useEffect(() => {
+    if (!measuring) return
+    function onKey(e) {
+      if (e.key === 'Escape' && measurePoints.length > 0 && !measureFinished) setMeasureFinished(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [measuring, measurePoints.length, measureFinished])
   const zoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
 
@@ -450,7 +471,6 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     if (activePointers.current.size === 2) {
       isPanning.current = false
       isCalibratingDrag.current = false
-      isMeasuringDrag.current = false
       const pts = Array.from(activePointers.current.values())
       const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
       const rect = wrapRef.current.getBoundingClientRect()
@@ -480,12 +500,18 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       return
     }
 
-    // Measure mode — click and drag a line to read its length in feet
+    // Measure mode — click to plot a point along the path, double-click
+    // (or Escape) when done. A finished measurement stays on screen
+    // until dismissed; clicking again after finishing starts a new one.
     if (measuring && e.button === 0) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
-      isMeasuringDrag.current = true
-      measureStartRef.current = { x, y }
-      setMeasureLine({ x1: x, y1: y, x2: x, y2: y, distFt: 0 })
+      if (measureFinished || measurePoints.length === 0) {
+        setMeasurePoints([{ x, y }])
+        setMeasureFinished(false)
+      } else {
+        setMeasurePoints(prev => [...prev, { x, y }])
+      }
+      setMeasureCursor({ x, y })
       return
     }
 
@@ -579,13 +605,9 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       setCalibDrag({ x1: calibStartRef.current.x, y1: calibStartRef.current.y, x2: x, y2: y })
       return
     }
-    if (isMeasuringDrag.current) {
+    if (measuring && measurePoints.length > 0 && !measureFinished) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
-      const start = measureStartRef.current
-      const dx = x - start.x, dy = y - start.y
-      const pixelDist = Math.sqrt(dx * dx + dy * dy)
-      const distFt = pxPerFt > 0 ? pixelDist / pxPerFt : 0
-      setMeasureLine({ x1: start.x, y1: start.y, x2: x, y2: y, distFt })
+      setMeasureCursor({ x, y })
       return
     }
     if (isPanning.current) {
@@ -619,12 +641,6 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     if (activePointers.current.size < 2) pinchStart.current = null
     if (activePointers.current.size >= 1) return // still mid-pinch or a finger still down — nothing else to resolve yet
 
-    if (isMeasuringDrag.current) {
-      isMeasuringDrag.current = false
-      // Leave the line + reading on screen so it can actually be read;
-      // it clears on the next drag or when the tool is switched off.
-      return
-    }
     if (isCalibratingDrag.current) {
       isCalibratingDrag.current = false
       const start = calibStartRef.current
@@ -807,6 +823,15 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         onPointerMove={handleWrapPointerMove}
         onPointerUp={handleWrapPointerUp}
         onPointerCancel={handleWrapPointerUp}
+        onDoubleClick={() => {
+          if (!measuring || measurePoints.length === 0 || measureFinished) return
+          // The double-click's second click already added a point via
+          // pointerdown above (dblclick fires after both underlying
+          // clicks complete) — drop that redundant duplicate before
+          // locking the path in.
+          setMeasurePoints(prev => prev.length > 1 ? prev.slice(0, -1) : prev)
+          setMeasureFinished(true)
+        }}
         onDragOver={e => e.preventDefault()}
         onDrop={handleDrop}
       >
@@ -986,29 +1011,46 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
           </div>
         )}
 
-        {/* Measurement overlay — line + live distance reading, stays
-            visible after mouseup so it can actually be read */}
-        {measureLine && (
-          <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', pointerEvents: 'none', zIndex: 20 }}>
-            <svg style={{ overflow: 'visible', position: 'absolute', top: 0, left: 0 }}>
-              <circle cx={measureLine.x1} cy={measureLine.y1} r={6 / zoom} fill="#378ADD" stroke="#fff" strokeWidth={2 / zoom} />
-              <line x1={measureLine.x1} y1={measureLine.y1} x2={measureLine.x2} y2={measureLine.y2}
-                stroke="#378ADD" strokeWidth={2.5 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`} />
-              <circle cx={measureLine.x2} cy={measureLine.y2} r={6 / zoom} fill="#378ADD" stroke="#fff" strokeWidth={2 / zoom} />
-            </svg>
-            <div style={{
-              position: 'absolute',
-              left: (measureLine.x1 + measureLine.x2) / 2,
-              top: (measureLine.y1 + measureLine.y2) / 2,
-              transform: `translate(-50%, -50%) scale(${1 / zoom})`,
-              transformOrigin: 'center',
-              background: '#378ADD', color: '#fff', fontSize: 12, fontWeight: 600,
-              padding: '3px 8px', borderRadius: 5, whiteSpace: 'nowrap', boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
-            }}>
-              {measureLine.distFt.toFixed(1)} ft
+        {/* Measurement overlay — a polyline through every plotted point
+            plus a live rubber-band preview to the next click, showing
+            the running total distance along the whole path. Stays
+            visible once finished so it can actually be read. */}
+        {measurePoints.length > 0 && (() => {
+          const previewPts = (!measureFinished && measureCursor) ? [...measurePoints, measureCursor] : measurePoints
+          const last = previewPts[previewPts.length - 1]
+          return (
+            <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', pointerEvents: 'none', zIndex: 20 }}>
+              <svg style={{ overflow: 'visible', position: 'absolute', top: 0, left: 0 }}>
+                {/* Finalized segments, solid */}
+                <polyline
+                  points={measurePoints.map(p => `${p.x},${p.y}`).join(' ')}
+                  fill="none" stroke="#378ADD" strokeWidth={2.5 / zoom} strokeLinejoin="round" strokeLinecap="round"
+                />
+                {/* Rubber-band preview to the cursor, dashed, while still adding points */}
+                {!measureFinished && measureCursor && measurePoints.length > 0 && (
+                  <line
+                    x1={measurePoints[measurePoints.length - 1].x} y1={measurePoints[measurePoints.length - 1].y}
+                    x2={measureCursor.x} y2={measureCursor.y}
+                    stroke="#378ADD" strokeWidth={2.5 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`}
+                  />
+                )}
+                {measurePoints.map((p, i) => (
+                  <circle key={i} cx={p.x} cy={p.y} r={5 / zoom} fill="#378ADD" stroke="#fff" strokeWidth={2 / zoom} />
+                ))}
+              </svg>
+              <div style={{
+                position: 'absolute',
+                left: last.x, top: last.y,
+                transform: `translate(-50%, -130%) scale(${1 / zoom})`,
+                transformOrigin: 'center',
+                background: '#378ADD', color: '#fff', fontSize: 12, fontWeight: 600,
+                padding: '3px 8px', borderRadius: 5, whiteSpace: 'nowrap', boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+              }}>
+                {measureTotalFt().toFixed(1)} ft{!measureFinished ? ' · double-click to finish' : ''}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Heat map outside zoom layer - always fills viewport */}
         <canvas ref={hmCanvasRef} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', opacity: 1 }} />

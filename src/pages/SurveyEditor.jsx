@@ -947,8 +947,8 @@ export default function SurveyEditor() {
         )}
         <button style={{ ...tbBtn, ...(measuring ? { color: '#378ADD', borderColor: '#378ADD', background: '#E9F2FC' } : {}) }}
           onClick={() => measuring ? setMeasuring(false) : startMeasure()}
-          title="Drag a line to measure a distance in feet">
-          <i className="ti ti-ruler-3" /> {measuring ? 'Drag to measure…' : 'Measure'}
+          title="Click to plot points along a path (e.g. a cable run around corners), double-click to finish">
+          <i className="ti ti-ruler-3" /> {measuring ? 'Click to add points…' : 'Measure'}
         </button>
         <button style={{ ...tbBtn, ...(showKey ? { color: '#378ADD', borderColor: '#378ADD', background: '#E9F2FC' } : {}) }}
           onClick={() => setShowKey(v => !v)}
