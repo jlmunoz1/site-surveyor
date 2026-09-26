@@ -86,7 +86,6 @@ export default function SurveyEditor() {
   // pixel grid — floor scans in the same building are very often
   // different scales, crops, or rotations from each other.
   const [showStackModal, setShowStackModal] = useState(false)
-  const [siblingSurveys, setSiblingSurveys] = useState([])
   const [stackTargets, setStackTargets] = useState({})
   const [stackingInProgress, setStackingInProgress] = useState(false)
   const [stackResults, setStackResults] = useState(null)
@@ -463,9 +462,6 @@ export default function SurveyEditor() {
   }, [survey?.project_id, id])
 
   async function openStackModal() {
-    const { data } = await getSurveys()
-    const siblings = (data || []).filter(s => s.project_id === survey?.project_id && s.id !== id)
-    setSiblingSurveys(siblings)
     setStackTargets({})
     setStackResults(null)
     setShowStackModal(true)
