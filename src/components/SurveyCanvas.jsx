@@ -785,7 +785,9 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               successfully but never actually show up. */}
           <svg ref={drawSvgRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }} />
 
-          {devices.map(d => (
+          {devices.map(d => {
+            const deviceIconSize = getSizeForDevice(d.dtype)
+            return (
             <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
               onDoubleClick={e => {
                 // Renaming normally happens via double-clicking the
@@ -799,9 +801,20 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                 const newLabel = prompt('Rename device:', d.label)
                 if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
               }}
-              style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+              style={{
+                position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                // Fixed to the icon's own size, not auto-sized to
+                // whichever child is widest — otherwise hiding the
+                // (usually wider) label shrinks this box and
+                // re-centers the icon within it, visibly shifting the
+                // icon even though its actual x/y never changed. The
+                // label can still extend past this width since it
+                // stays centered and nothing here clips it.
+                width: deviceIconSize,
+              }}>
               {(() => {
-                const sz = getSizeForDevice(d.dtype)
+                const sz = deviceIconSize
                 const status = d.status || 'existing'
                 const statusInfo = DEVICE_STATUSES[status] || DEVICE_STATUSES.existing
                 const isProposed = status === 'proposed'
@@ -847,7 +860,8 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                 )
               })()}
             </div>
-          ))}
+            )
+          })}
 
           {/* Reference-floor ghost gateways — faint, non-interactive,
               purely for visual alignment/reference. Rendered inside
@@ -856,7 +870,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
           {ghostGateways.map((gw, i) => {
             const sz = getSizeForDevice('rak-gw')
             return (
-              <div key={`ghost-${i}`} style={{ position: 'absolute', left: gw.x, top: gw.y, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: 0.55 }}>
+              <div key={`ghost-${i}`} style={{ position: 'absolute', left: gw.x, top: gw.y, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: 0.55, width: sz }}>
                 <div style={{ width: sz, height: sz, borderRadius: Math.round(sz * 0.25), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px dashed #378ADD', background: '#378ADD10' }}>
                   <svg width={sz * 0.7} height={sz * 0.7} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths('rak-gw', '#378ADD') }} />
                 </div>
