@@ -14,18 +14,17 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   iconSizes = { cameras: 16, lora: 20, network: 20, access: 16 },
   labelSizes = { cameras: 10, lora: 13, network: 10, access: 10 },
   hiddenLabelTypes = [],
+  // Other floors' gateways, already translated into this survey's
+  // pixel space (via SurveyEditor's cross-floor geo mapping) — shown
+  // as faint, non-interactive reference markers + coverage rings, for
+  // aligning a stacked gateway or just seeing what's covering this
+  // floor from above/below. Never persisted; purely a display aid.
+  ghostGateways = [],
   heatmapOpacity = 0.8,
   calibrating = false,
   measuring = false,
   onCalibrateDrag,
   readOnly = false,
-  // Touch-friendly alternative to native drag-and-drop from the device
-  // palette (which has no reliable touch support in mobile browsers).
-  // When set, the next tap on the canvas places a device of this type;
-  // onArmedDevicePlaced fires once it's placed so the parent can clear
-  // the armed state.
-  armedDevice = null,
-  onArmedDevicePlaced,
   // Fired once the floor plan (if any) has finished loading and been
   // drawn — or immediately if there's no floor plan at all. Used by
   // the bulk PDF export flow to know exactly when it's safe to
@@ -51,45 +50,16 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   const isCalibratingDrag = useRef(false)
   const calibStartRef = useRef({ x: 0, y: 0 })
   const [calibDrag, setCalibDrag] = useState(null) // { x1, y1, x2, y2 } while actively dragging
-  // Multi-point measuring — click to plot a point, double-click (or
-  // Escape) to finish. Distance is the sum of every segment along the
-  // path, which is what actually matters for tracing a cable pathway
-  // around corners rather than a single point-to-point straight line.
-  const [measurePoints, setMeasurePoints] = useState([]) // finalized points: [{x,y}, ...]
-  const [measureCursor, setMeasureCursor] = useState(null) // live position for the rubber-band preview to the next click
-  const [measureFinished, setMeasureFinished] = useState(false)
+  const isMeasuringDrag = useRef(false)
+  const measureStartRef = useRef({ x: 0, y: 0 })
+  const [measureLine, setMeasureLine] = useState(null) // { x1, y1, x2, y2, distFt } — persists after mouseup so it can be read
 
-  // Clear the measurement whenever the tool is switched off
+  // Clear the measurement line whenever the tool is switched off
   useEffect(() => {
-    if (!measuring) { setMeasurePoints([]); setMeasureCursor(null); setMeasureFinished(false) }
+    if (!measuring) setMeasureLine(null)
   }, [measuring])
-
-  function measureTotalFt() {
-    const pts = (!measureFinished && measureCursor) ? [...measurePoints, measureCursor] : measurePoints
-    let totalPx = 0
-    for (let i = 1; i < pts.length; i++) totalPx += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
-    return pxPerFt > 0 ? totalPx / pxPerFt : 0
-  }
-
-  // Escape finishes an in-progress measurement, same as double-click
-  useEffect(() => {
-    if (!measuring) return
-    function onKey(e) {
-      if (e.key === 'Escape' && measurePoints.length > 0 && !measureFinished) setMeasureFinished(true)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [measuring, measurePoints.length, measureFinished])
   const zoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
-
-  // Multi-touch pinch-to-zoom — Pointer Events fire one event stream
-  // per finger (each with its own pointerId), so a pinch gesture has
-  // to be assembled by hand from two simultaneously-active pointers
-  // rather than arriving as a single ready-made "pinch" event the way
-  // wheel-based trackpad zoom does.
-  const activePointers = useRef(new Map()) // pointerId -> {x, y}
-  const pinchStart = useRef(null) // { dist, zoom, pan, midX, midY } captured when the 2nd finger touches down
 
   // Exposes the floor plan's current on-screen bounding box (relative
   // to the wrapper), so the parent can crop an export capture to just
@@ -338,8 +308,15 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     ctx.save()
     ctx.filter = 'blur(10px)'
     gws.forEach(gw => {
-      const cx = (gw.x + 19) * zoom + pan.x
-      const cy = (gw.y + 19) * zoom + pan.y
+      // Center on the gateway icon's actual current size (iconSizes.lora,
+      // user-configurable) rather than a hardcoded half-of-38 — that
+      // hardcoded offset predates per-category icon sizing and only
+      // happened to line up when every icon was a fixed 38px. At any
+      // other icon size it silently drifts, which is exactly why the
+      // circle looked off-center here.
+      const halfIcon = getSizeForDevice(gw.dtype) / 2
+      const cx = (gw.x + halfIcon) * zoom + pan.x
+      const cy = (gw.y + halfIcon) * zoom + pan.y
       const r = Math.round((gw.hmRangeFt || 150) * pxPerFt * zoom)
       if (r <= 0) return
       const strengthSetting = gw.hmStrength ?? 1
@@ -380,7 +357,24 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
       ctx.restore()
     })
-  }, [devices, showHeatmap, pxPerFt, zoom, pan, heatmapOpacity])
+
+    // Reference-floor ghost gateways — a faint, clearly-not-real-here
+    // ring only (no filled gradient, so it never reads as actual
+    // coverage on THIS floor), for aligning a stacked gateway or
+    // seeing what another floor already covers.
+    ghostGateways.forEach(gw => {
+      const cx = (gw.x + getSizeForDevice('rak-gw') / 2) * zoom + pan.x
+      const cy = (gw.y + getSizeForDevice('rak-gw') / 2) * zoom + pan.y
+      const r = Math.round((gw.hmRangeFt || 150) * pxPerFt * zoom)
+      if (r <= 0) return
+      ctx.save()
+      ctx.setLineDash([3, 6])
+      ctx.strokeStyle = 'rgba(55,138,221,0.5)'
+      ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
+      ctx.restore()
+    })
+  }, [devices, ghostGateways, showHeatmap, pxPerFt, zoom, pan, heatmapOpacity])
 
   // Restore SVG markup on mount only
   useEffect(() => {
@@ -460,31 +454,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  function handleWrapPointerDown(e) {
-    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-
-    // Second finger touching down starts a pinch — capture the
-    // starting distance/zoom/pan so subsequent moves can scale
-    // relative to this baseline, and bail out of every other
-    // single-pointer interaction (panning, drawing, measuring, etc.)
-    // for the duration of the gesture.
-    if (activePointers.current.size === 2) {
-      isPanning.current = false
-      isCalibratingDrag.current = false
-      const pts = Array.from(activePointers.current.values())
-      const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
-      const rect = wrapRef.current.getBoundingClientRect()
-      pinchStart.current = {
-        dist: dist || 1,
-        zoom: zoomRef.current,
-        pan: { ...panRef.current },
-        midX: (pts[0].x + pts[1].x) / 2 - rect.left,
-        midY: (pts[0].y + pts[1].y) / 2 - rect.top,
-      }
-      return
-    }
-    if (activePointers.current.size > 2) return // ignore a 3rd+ finger entirely
-
+  function handleWrapMouseDown(e) {
     if (e.target.closest('.sv-device')) return
 
     // Read-only (shared link) view — allow panning/zooming to look
@@ -500,26 +470,19 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       return
     }
 
-    // Measure mode — click to plot a point along the path, double-click
-    // (or Escape) when done. A finished measurement stays on screen
-    // until dismissed; clicking again after finishing starts a new one.
+    // Measure mode — click and drag a line to read its length in feet
     if (measuring && e.button === 0) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
-      if (measureFinished || measurePoints.length === 0) {
-        setMeasurePoints([{ x, y }])
-        setMeasureFinished(false)
-      } else {
-        setMeasurePoints(prev => [...prev, { x, y }])
-      }
-      setMeasureCursor({ x, y })
+      isMeasuringDrag.current = true
+      measureStartRef.current = { x, y }
+      setMeasureLine({ x1: x, y1: y, x2: x, y2: y, distFt: 0 })
       return
     }
 
     // Click-and-hold to pan: middle-click or Alt+click always pans.
     // In select mode (the grab-hand cursor), a plain left-click-and-hold
-    // on empty canvas also pans — pointerup below decides whether it ended
-    // up being a real drag (pan), a tap to place an armed device, or
-    // just a click (deselect).
+    // on empty canvas also pans — mouseup below decides whether it ended
+    // up being a real drag (pan) or just a click (deselect).
     const wantsPan = e.button === 1 || (e.button === 0 && e.altKey) || (e.button === 0 && mode === 'select')
     if (wantsPan) {
       e.preventDefault()
@@ -566,48 +529,19 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     }
   }
 
-  function handleWrapPointerMove(e) {
-    if (activePointers.current.has(e.pointerId)) {
-      activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-    }
-
-    if (activePointers.current.size === 2 && pinchStart.current) {
-      const pts = Array.from(activePointers.current.values())
-      const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) || 1
-      const rect = wrapRef.current.getBoundingClientRect()
-      const midX = (pts[0].x + pts[1].x) / 2 - rect.left
-      const midY = (pts[0].y + pts[1].y) / 2 - rect.top
-      const base = baseZoomRef.current || 1
-      const scale = dist / pinchStart.current.dist
-      const newZoom = Math.min(Math.max(pinchStart.current.zoom * scale, base), 8)
-      // Zoom anchored at the pinch's starting midpoint, then carry any
-      // subsequent two-finger drag as a pan on top of that — matches
-      // how pinch-zoom feels in native apps (zoom and pan together in
-      // one continuous gesture rather than as two separate steps).
-      const zoomedPan = {
-        x: pinchStart.current.midX - (pinchStart.current.midX - pinchStart.current.pan.x) * (newZoom / pinchStart.current.zoom),
-        y: pinchStart.current.midY - (pinchStart.current.midY - pinchStart.current.pan.y) * (newZoom / pinchStart.current.zoom),
-      }
-      const newPan = {
-        x: zoomedPan.x + (midX - pinchStart.current.midX),
-        y: zoomedPan.y + (midY - pinchStart.current.midY),
-      }
-      zoomRef.current = newZoom
-      panRef.current = newPan
-      setZoom(newZoom)
-      setPan(newPan)
-      return
-    }
-    if (activePointers.current.size >= 2) return // 3rd+ finger — ignore until back down to a single pointer
-
+  function handleWrapMouseMove(e) {
     if (isCalibratingDrag.current) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
       setCalibDrag({ x1: calibStartRef.current.x, y1: calibStartRef.current.y, x2: x, y2: y })
       return
     }
-    if (measuring && measurePoints.length > 0 && !measureFinished) {
+    if (isMeasuringDrag.current) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
-      setMeasureCursor({ x, y })
+      const start = measureStartRef.current
+      const dx = x - start.x, dy = y - start.y
+      const pixelDist = Math.sqrt(dx * dx + dy * dy)
+      const distFt = pxPerFt > 0 ? pixelDist / pxPerFt : 0
+      setMeasureLine({ x1: start.x, y1: start.y, x2: x, y2: y, distFt })
       return
     }
     if (isPanning.current) {
@@ -636,11 +570,13 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     }
   }
 
-  function handleWrapPointerUp(e) {
-    activePointers.current.delete(e.pointerId)
-    if (activePointers.current.size < 2) pinchStart.current = null
-    if (activePointers.current.size >= 1) return // still mid-pinch or a finger still down — nothing else to resolve yet
-
+  function handleWrapMouseUp(e) {
+    if (isMeasuringDrag.current) {
+      isMeasuringDrag.current = false
+      // Leave the line + reading on screen so it can actually be read;
+      // it clears on the next drag or when the tool is switched off.
+      return
+    }
     if (isCalibratingDrag.current) {
       isCalibratingDrag.current = false
       const start = calibStartRef.current
@@ -652,22 +588,15 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     if (isPanning.current) {
       isPanning.current = false
       // In select mode, a click-and-hold that never actually moved is
-      // just a tap on empty space — either place an armed device
-      // (touch-friendly alternative to dragging from the sidebar) or,
-      // with nothing armed, deselect same as before. If it moved, it
-      // was a real pan drag, so leave the current selection alone.
+      // just a click on empty space — deselect, same as before. If it
+      // moved, it was a real pan drag, so leave the current selection
+      // (if any) alone.
       if (mode === 'select') {
         const dx = e.clientX - panStart.current.x
         const dy = e.clientY - panStart.current.y
         if (Math.hypot(dx, dy) < 4) {
-          if (armedDevice && !readOnly) {
-            const { x, y } = toCanvas(e.clientX, e.clientY)
-            onDeviceAdd({ ...armedDevice, x: x - 19, y: y - 19, hmRangeFt: 120, hmStrength: 0.75 })
-            if (onArmedDevicePlaced) onArmedDevicePlaced()
-          } else {
-            onDeviceSelect(null)
-            onCableSelect(null)
-          }
+          onDeviceSelect(null)
+          onCableSelect(null)
         }
       }
       return
@@ -681,10 +610,15 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     setDrawingCable(null)
   }
 
-  function handleDevicePointerDown(e, device) {
+  function handleDeviceMouseDown(e, device) {
     e.stopPropagation()
     if (mode === 'cable') {
-      const cx = device.x + 19, cy = device.y + 19
+      // Same fix as the heatmap centering above — anchor to the
+      // device's actual current icon size, not a stale hardcoded 38px
+      // assumption, so cables visually connect to the icon's real
+      // center regardless of its configured size.
+      const half = getSizeForDevice(device.dtype) / 2
+      const cx = device.x + half, cy = device.y + half
       if (!drawingCable) setDrawingCable({ x1: cx, y1: cy, fromId: device.id, type: activeCableType })
       else finishCable(cx, cy, device.id)
       return
@@ -695,18 +629,13 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     const rect = wrapRef.current.getBoundingClientRect()
     const startX = (e.clientX - rect.left - panRef.current.x) / zoomRef.current - device.x
     const startY = (e.clientY - rect.top - panRef.current.y) / zoomRef.current - device.y
-    // Pointer capture keeps move/up events targeting this element even
-    // as a finger drags outside its original bounds — without it,
-    // touch-dragging a device on mobile loses tracking the moment the
-    // finger moves past the (often small) icon's own hit area.
-    e.target.setPointerCapture?.(e.pointerId)
     function onMove(mv) {
       const x = (mv.clientX - rect.left - panRef.current.x) / zoomRef.current - startX
       const y = (mv.clientY - rect.top - panRef.current.y) / zoomRef.current - startY
       onDeviceMove(device.id, x, y)
     }
-    function onUp() { document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); document.removeEventListener('pointercancel', onUp) }
-    document.addEventListener('pointermove', onMove); document.addEventListener('pointerup', onUp); document.addEventListener('pointercancel', onUp)
+    function onUp() { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
   }
 
   function handleDrop(e) {
@@ -796,7 +725,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   const transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
 
   return (
-    <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+    <div style={{ flex: 1, minWidth: 0, position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <button onClick={zoomIn} style={zoomBtn}>+</button>
         <button onClick={zoomOut} style={zoomBtn}>−</button>
@@ -811,27 +740,12 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         style={{
           width: '100%', height: '100%', position: 'relative', overflow: 'hidden',
           cursor: (calibrating || measuring) ? 'crosshair' : isPanning.current ? 'grabbing' : mode === 'select' ? 'grab' : 'crosshair',
-          background: 'repeating-linear-gradient(0deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px),repeating-linear-gradient(90deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px)',
-          // Hands touch gestures entirely to our own pan/pinch-zoom
-          // handling — without this, mobile browsers intercept
-          // one/two-finger gestures for native page scroll/zoom before
-          // our pointer handlers ever see them.
-          touchAction: 'none',
+          background: 'repeating-linear-gradient(0deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px),repeating-linear-gradient(90deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px)'
         }}
         data-export-canvas="true"
-        onPointerDown={handleWrapPointerDown}
-        onPointerMove={handleWrapPointerMove}
-        onPointerUp={handleWrapPointerUp}
-        onPointerCancel={handleWrapPointerUp}
-        onDoubleClick={() => {
-          if (!measuring || measurePoints.length === 0 || measureFinished) return
-          // The double-click's second click already added a point via
-          // pointerdown above (dblclick fires after both underlying
-          // clicks complete) — drop that redundant duplicate before
-          // locking the path in.
-          setMeasurePoints(prev => prev.length > 1 ? prev.slice(0, -1) : prev)
-          setMeasureFinished(true)
-        }}
+        onMouseDown={handleWrapMouseDown}
+        onMouseMove={handleWrapMouseMove}
+        onMouseUp={e => handleWrapMouseUp(e)}
         onDragOver={e => e.preventDefault()}
         onDrop={handleDrop}
       >
@@ -871,54 +785,8 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               successfully but never actually show up. */}
           <svg ref={drawSvgRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }} />
 
-          {/* Cover patches for AI/color-detected devices — hides the
-              original flattened marker pixels from the source PDF/image
-              underneath the new editable device icon. Purely a visual
-              overlay in this same pan/zoom layer; the underlying floor
-              plan image itself is never modified, so this disappears
-              automatically if the device it belongs to gets deleted.
-              Sized directly off the icon's own render size (a value we
-              already know looks right at any zoom/PDF) rather than the
-              detected blob's measured pixels converted through the
-              PDF's own point-scale — that math could produce a patch
-              far bigger than intended depending on a given PDF's real
-              point dimensions, which is what caused this to blanket
-              large areas of some floor plans. */}
-          {devices.filter(d => d.mask).map(d => {
-            // AI detection can supply a tight per-marker bounding box
-            // (capped upstream); color-based detection can't, so it
-            // falls back to a size relative to the icon itself — a
-            // value we already know renders sanely at any zoom/PDF.
-            // Floored here too (not just at detection time) so an
-            // already-saved device with a bad, near-zero stored value
-            // self-heals on the next load instead of staying invisible
-            // until re-detected.
-            const iconFallback = getSizeForDevice(d.dtype) * 2
-            // Bounded BOTH directions, entirely relative to the icon's
-            // own render size — not an absolute unit value. Absolute
-            // caps (e.g. "150 units") kept breaking because a given
-            // number of "points" means a wildly different real-world
-            // size depending on each PDF's own page dimensions; tying
-            // this purely to a value we already know renders correctly
-            // (the icon size) sidesteps that entirely, on every PDF.
-            const maskW = Math.min(Math.max(d.maskW || iconFallback, iconFallback * 0.6), iconFallback * 1.5)
-            const maskH = Math.min(Math.max(d.maskH || iconFallback, iconFallback * 0.6), iconFallback * 1.5)
-            return (
-              <div key={'mask-' + d.id} style={{
-                position: 'absolute',
-                left: d.x + 19 - maskW / 2,
-                top: d.y + 19 - maskH / 2,
-                width: maskW, height: maskH,
-                borderRadius: Math.min(maskW, maskH) / 2,
-                background: '#fdfdfb',
-                boxShadow: '0 0 3px 1px #fdfdfbdd',
-                pointerEvents: 'none',
-              }} />
-            )
-          })}
-
           {devices.map(d => (
-            <div key={d.id} className="sv-device" onPointerDown={e => handleDevicePointerDown(e, d)}
+            <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
               onDoubleClick={e => {
                 // Renaming normally happens via double-clicking the
                 // label text itself — but if this device type's labels
@@ -931,16 +799,9 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                 const newLabel = prompt('Rename device:', d.label)
                 if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
               }}
-              style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', touchAction: 'none' }}>
+              style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
               {(() => {
-                // Detected devices render smaller while awaiting review
-                // — the dashed amber outline + badge already flag them
-                // as "needs review," and full-size renders as a fairly
-                // busy shape at this scale (the RAK Gateway icon in
-                // particular is a dense 8-petal flower). Confirming a
-                // device drops `unconfirmed`, so it snaps back to the
-                // survey's normal icon size immediately.
-                const sz = getSizeForDevice(d.dtype) * (d.unconfirmed ? 0.55 : 1)
+                const sz = getSizeForDevice(d.dtype)
                 const status = d.status || 'existing'
                 const statusInfo = DEVICE_STATUSES[status] || DEVICE_STATUSES.existing
                 const isProposed = status === 'proposed'
@@ -953,21 +814,14 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                       width: sz, height: sz, borderRadius: Math.round(sz * 0.25), display: 'flex', alignItems: 'center', justifyContent: 'center',
                       background: sz > 8 ? d.color + '15' : 'transparent',
                       opacity: isRemoved ? 0.45 : 1,
-                      border: d.unconfirmed
-                        ? `${Math.max(borderWidth, 2)}px dashed #BA7517`
-                        : selectedId === d.id
-                          ? `${borderWidth}px solid ${d.color}`
-                          : `${borderWidth}px ${isProposed ? 'dashed' : 'solid'} ${isProposed ? statusInfo.color + '99' : 'transparent'}`,
-                      boxShadow: d.unconfirmed ? '0 0 0 3px #F0D48866' : (selectedId === d.id ? `0 0 0 2px ${d.color}33` : 'none')
+                      border: selectedId === d.id
+                        ? `${borderWidth}px solid ${d.color}`
+                        : `${borderWidth}px ${isProposed ? 'dashed' : 'solid'} ${isProposed ? statusInfo.color + '99' : 'transparent'}`,
+                      boxShadow: selectedId === d.id ? `0 0 0 2px ${d.color}33` : 'none'
                     }}>
                       <svg width={sz} height={sz} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
                       {isRemoved && (
                         <div style={{ position: 'absolute', left: '10%', top: '48%', width: '80%', height: Math.max(1, Math.round(sz * 0.06)), background: statusInfo.color, transform: 'rotate(-15deg)' }} />
-                      )}
-                      {d.unconfirmed && (
-                        <div title="Detected automatically — needs review" style={{ position: 'absolute', top: -3, left: -3, width: Math.max(10, Math.round(sz * 0.35)), height: Math.max(10, Math.round(sz * 0.35)), borderRadius: '50%', background: '#BA7517', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <i className="ti ti-scan" style={{ fontSize: Math.max(6, Math.round(sz * 0.2)), color: '#fff' }} />
-                        </div>
                       )}
                       {d.photoUrl && sz >= 12 && (
                         <div style={{ position: 'absolute', top: -3, right: -3, width: Math.max(10, Math.round(sz * 0.35)), height: Math.max(10, Math.round(sz * 0.35)), borderRadius: '50%', background: '#378ADD', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -984,10 +838,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                           const newLabel = prompt('Rename device:', d.label)
                           if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
                         }}
-                        style={{
-                          position: 'absolute', top: sz + 2, left: '50%', transform: 'translateX(-50%)',
-                          fontSize: getLabelSizeForDevice(d.dtype), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: readOnly ? 'default' : 'text'
-                        }}>
+                        style={{ fontSize: getLabelSizeForDevice(d.dtype), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: readOnly ? 'default' : 'text' }}>
                         {d.label}
                         {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
                       </div>
@@ -997,6 +848,24 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               })()}
             </div>
           ))}
+
+          {/* Reference-floor ghost gateways — faint, non-interactive,
+              purely for visual alignment/reference. Rendered inside
+              the same transformed layer as real devices so they pan
+              and zoom identically. */}
+          {ghostGateways.map((gw, i) => {
+            const sz = getSizeForDevice('rak-gw')
+            return (
+              <div key={`ghost-${i}`} style={{ position: 'absolute', left: gw.x, top: gw.y, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: 0.55 }}>
+                <div style={{ width: sz, height: sz, borderRadius: Math.round(sz * 0.25), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px dashed #378ADD', background: '#378ADD10' }}>
+                  <svg width={sz * 0.7} height={sz * 0.7} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths('rak-gw', '#378ADD') }} />
+                </div>
+                <div style={{ fontSize: 9, color: '#378ADD', background: 'rgba(255,255,255,0.9)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #378ADD55', whiteSpace: 'nowrap' }}>
+                  {gw.label} · {gw.sourceFloorName}
+                </div>
+              </div>
+            )
+          })}
         </div>
 
         {/* Calibration overlay — live line while dragging */}
@@ -1011,46 +880,29 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
           </div>
         )}
 
-        {/* Measurement overlay — a polyline through every plotted point
-            plus a live rubber-band preview to the next click, showing
-            the running total distance along the whole path. Stays
-            visible once finished so it can actually be read. */}
-        {measurePoints.length > 0 && (() => {
-          const previewPts = (!measureFinished && measureCursor) ? [...measurePoints, measureCursor] : measurePoints
-          const last = previewPts[previewPts.length - 1]
-          return (
-            <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', pointerEvents: 'none', zIndex: 20 }}>
-              <svg style={{ overflow: 'visible', position: 'absolute', top: 0, left: 0 }}>
-                {/* Finalized segments, solid */}
-                <polyline
-                  points={measurePoints.map(p => `${p.x},${p.y}`).join(' ')}
-                  fill="none" stroke="#378ADD" strokeWidth={2.5 / zoom} strokeLinejoin="round" strokeLinecap="round"
-                />
-                {/* Rubber-band preview to the cursor, dashed, while still adding points */}
-                {!measureFinished && measureCursor && measurePoints.length > 0 && (
-                  <line
-                    x1={measurePoints[measurePoints.length - 1].x} y1={measurePoints[measurePoints.length - 1].y}
-                    x2={measureCursor.x} y2={measureCursor.y}
-                    stroke="#378ADD" strokeWidth={2.5 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`}
-                  />
-                )}
-                {measurePoints.map((p, i) => (
-                  <circle key={i} cx={p.x} cy={p.y} r={5 / zoom} fill="#378ADD" stroke="#fff" strokeWidth={2 / zoom} />
-                ))}
-              </svg>
-              <div style={{
-                position: 'absolute',
-                left: last.x, top: last.y,
-                transform: `translate(-50%, -130%) scale(${1 / zoom})`,
-                transformOrigin: 'center',
-                background: '#378ADD', color: '#fff', fontSize: 12, fontWeight: 600,
-                padding: '3px 8px', borderRadius: 5, whiteSpace: 'nowrap', boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
-              }}>
-                {measureTotalFt().toFixed(1)} ft{!measureFinished ? ' · double-click to finish' : ''}
-              </div>
+        {/* Measurement overlay — line + live distance reading, stays
+            visible after mouseup so it can actually be read */}
+        {measureLine && (
+          <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', pointerEvents: 'none', zIndex: 20 }}>
+            <svg style={{ overflow: 'visible', position: 'absolute', top: 0, left: 0 }}>
+              <circle cx={measureLine.x1} cy={measureLine.y1} r={6 / zoom} fill="#378ADD" stroke="#fff" strokeWidth={2 / zoom} />
+              <line x1={measureLine.x1} y1={measureLine.y1} x2={measureLine.x2} y2={measureLine.y2}
+                stroke="#378ADD" strokeWidth={2.5 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`} />
+              <circle cx={measureLine.x2} cy={measureLine.y2} r={6 / zoom} fill="#378ADD" stroke="#fff" strokeWidth={2 / zoom} />
+            </svg>
+            <div style={{
+              position: 'absolute',
+              left: (measureLine.x1 + measureLine.x2) / 2,
+              top: (measureLine.y1 + measureLine.y2) / 2,
+              transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+              transformOrigin: 'center',
+              background: '#378ADD', color: '#fff', fontSize: 12, fontWeight: 600,
+              padding: '3px 8px', borderRadius: 5, whiteSpace: 'nowrap', boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+            }}>
+              {measureLine.distFt.toFixed(1)} ft
             </div>
-          )
-        })()}
+          </div>
+        )}
 
         {/* Heat map outside zoom layer - always fills viewport */}
         <canvas ref={hmCanvasRef} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', opacity: 1 }} />

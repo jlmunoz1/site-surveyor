@@ -140,6 +140,24 @@ export function fitGeoTransform(points) {
       const y = d * px + e * py + f
       return proj.toLatLng(x, y)
     },
+    // The reverse of apply(): given a real-world lat/lng, finds the
+    // floor-plan pixel it corresponds to. This is what makes it
+    // possible to take a device's position on one floor and place it
+    // at the matching spot on a different floor's plan — even if that
+    // floor's scan has a different scale, crop, or rotation — by going
+    // through real-world coordinates as the common reference frame
+    // instead of assuming the two floor plans share a pixel grid.
+    // Returns null if the fitted transform is degenerate (shouldn't
+    // happen for a transform that fit successfully, but checked for
+    // safety since a matrix inversion is involved).
+    invert(lat, lng) {
+      const { x, y } = proj.toXY(lat, lng)
+      const det = a * e - b * d
+      if (Math.abs(det) < 1e-9) return null
+      const px = (e * (x - c) - b * (y - f)) / det
+      const py = (a * (y - f) - d * (x - c)) / det
+      return { px, py }
+    },
   }
 }
 

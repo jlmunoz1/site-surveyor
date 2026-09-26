@@ -168,23 +168,6 @@ export async function deleteEnterprise(id) {
   return supabase.from('enterprises').delete().eq('id', id)
 }
 
-// Folds a duplicate enterprise into another: every project currently
-// filed under `fromId` gets reassigned to `toId`, then the now-empty
-// `fromId` enterprise is deleted. Used by the admin "merge duplicates"
-// flow — reassignment happens first and is checked before the delete
-// is attempted, so a partial failure never silently loses projects.
-export async function mergeEnterprises(fromId, toId) {
-  if (fromId === toId) return { error: new Error('Cannot merge an enterprise into itself') }
-  const { error: reassignError } = await supabase
-    .from('projects')
-    .update({ enterprise_id: toId })
-    .eq('enterprise_id', fromId)
-  if (reassignError) return { error: reassignError }
-  const { error: deleteError } = await supabase.from('enterprises').delete().eq('id', fromId)
-  if (deleteError) return { error: deleteError }
-  return { error: null }
-}
-
 // Assigns (or unassigns, if enterpriseId is null) a project to an
 // enterprise. Same zero-row check pattern as the other project writes.
 export async function setProjectEnterprise(projectId, enterpriseId) {
@@ -350,28 +333,6 @@ export async function getMyProfile(userId) {
   return supabase.from('profiles').select('*').eq('id', userId).single()
 }
 
-export async function updateMyName(userId, fullName) {
-  return supabase.from('profiles').update({ full_name: fullName }).eq('id', userId)
-}
-
-// Self-heal fallback for a missing profiles row — see api/ensure-profile.js
-// for why this exists. Only ever called after getMyProfile() comes back
-// empty for the currently logged-in user.
-export async function ensureMyProfile(accessToken) {
-  try {
-    const res = await fetch('/api/ensure-profile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessToken }),
-    })
-    const data = await res.json()
-    if (!res.ok) return { created: false, error: data.error || 'Failed to ensure profile' }
-    return { created: data.created, error: null }
-  } catch (err) {
-    return { created: false, error: err.message || 'Failed to reach profile service' }
-  }
-}
-
 // Used to attribute a conflicting save to a name in the "someone else
 // changed this" banner (survey.updated_by -> profiles.id).
 export async function getProfileById(id) {
@@ -380,49 +341,6 @@ export async function getProfileById(id) {
 
 export async function setUserAdmin(id, isAdmin) {
   return supabase.from('profiles').update({ is_admin: isAdmin }).eq('id', id)
-}
-
-// Controls whether a user gets org-wide "staff" visibility or is
-// scoped down to only projects they own or were invited to — separate
-// from access_expires_at, which controls whether their access works AT
-// ALL rather than how much of the org it covers. New accounts that
-// sign up in response to a project invite are auto-flagged as a
-// contractor (see handle_new_user in supabase-contractor-scope-migration.sql);
-// this lets an admin override that either direction.
-export async function setUserContractor(id, isContractor) {
-  return supabase.from('profiles').update({ is_contractor: isContractor }).eq('id', id)
-}
-
-// Admin-side user management — creates/deletes accounts directly and
-// reconciles the profiles-driven Users list against what's actually
-// in auth.users, bypassing the fragile signup-trigger path entirely.
-// All three verify the caller is a real admin server-side; accessToken
-// comes from supabase.auth.getSession().
-async function callAdminUserApi(path, body) {
-  try {
-    const res = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    const data = await res.json()
-    if (!res.ok) return { data: null, error: data.error || 'Request failed' }
-    return { data, error: null }
-  } catch (err) {
-    return { data: null, error: err.message || 'Failed to reach server' }
-  }
-}
-
-export async function adminCreateUser({ accessToken, email, fullName, role, projectIds, targetUserId }) {
-  return callAdminUserApi('/api/admin-create-user', { accessToken, email, fullName, role, projectIds, targetUserId })
-}
-
-export async function adminDeleteUser({ accessToken, targetUserId }) {
-  return callAdminUserApi('/api/admin-delete-user', { accessToken, targetUserId })
-}
-
-export async function adminListOrphans({ accessToken }) {
-  return callAdminUserApi('/api/admin-list-orphans', { accessToken })
 }
 
 export async function setUserAccessExpiration(id, expiresAt) {
