@@ -313,7 +313,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       // hardcoded offset predates per-category icon sizing and only
       // happened to line up when every icon was a fixed 38px. At any
       // other icon size it silently drifts, which is exactly why the
-      // circle looked off-center here.
+      // circle looked off-center.
       const halfIcon = getSizeForDevice(gw.dtype) / 2
       const cx = (gw.x + halfIcon) * zoom + pan.x
       const cy = (gw.y + halfIcon) * zoom + pan.y
@@ -363,8 +363,9 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     // coverage on THIS floor), for aligning a stacked gateway or
     // seeing what another floor already covers.
     ghostGateways.forEach(gw => {
-      const cx = (gw.x + getSizeForDevice('rak-gw') / 2) * zoom + pan.x
-      const cy = (gw.y + getSizeForDevice('rak-gw') / 2) * zoom + pan.y
+      const halfIcon = getSizeForDevice('rak-gw') / 2
+      const cx = (gw.x + halfIcon) * zoom + pan.x
+      const cy = (gw.y + halfIcon) * zoom + pan.y
       const r = Math.round((gw.hmRangeFt || 150) * pxPerFt * zoom)
       if (r <= 0) return
       ctx.save()
@@ -644,7 +645,11 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     if (!raw) return
     const data = JSON.parse(raw)
     const { x, y } = toCanvas(e.clientX, e.clientY)
-    onDeviceAdd({ ...data, x: x - 19, y: y - 19, hmRangeFt: 120, hmStrength: 0.75 })
+    // Center the icon under the cursor at drop time, using its actual
+    // configured size rather than a hardcoded 38px assumption — same
+    // fix as the heatmap/cable-anchor centering elsewhere in this file.
+    const half = getSizeForDevice(data.dtype) / 2
+    onDeviceAdd({ ...data, x: x - half, y: y - half, hmRangeFt: 120, hmStrength: 0.75 })
   }
 
   function zoomIn() {
@@ -785,9 +790,53 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
               successfully but never actually show up. */}
           <svg ref={drawSvgRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }} />
 
-          {devices.map(d => {
-            const deviceIconSize = getSizeForDevice(d.dtype)
+          {/* Cover patches for AI/color-detected devices — hides the
+              original flattened marker pixels from the source PDF/image
+              underneath the new editable device icon. Purely a visual
+              overlay in this same pan/zoom layer; the underlying floor
+              plan image itself is never modified, so this disappears
+              automatically if the device it belongs to gets deleted.
+              Sized directly off the icon's own render size (a value we
+              already know looks right at any zoom/PDF) rather than the
+              detected blob's measured pixels converted through the
+              PDF's own point-scale — that math could produce a patch
+              far bigger than intended depending on a given PDF's real
+              point dimensions, which is what caused this to blanket
+              large areas of some floor plans. */}
+          {devices.filter(d => d.mask).map(d => {
+            // AI detection can supply a tight per-marker bounding box
+            // (capped upstream); color-based detection can't, so it
+            // falls back to a size relative to the icon itself — a
+            // value we already know renders sanely at any zoom/PDF.
+            // Floored here too (not just at detection time) so an
+            // already-saved device with a bad, near-zero stored value
+            // self-heals on the next load instead of staying invisible
+            // until re-detected.
+            const iconFallback = getSizeForDevice(d.dtype) * 2
+            // Bounded BOTH directions, entirely relative to the icon's
+            // own render size — not an absolute unit value. Absolute
+            // caps (e.g. "150 units") kept breaking because a given
+            // number of "points" means a wildly different real-world
+            // size depending on each PDF's own page dimensions; tying
+            // this purely to a value we already know renders correctly
+            // (the icon size) sidesteps that entirely, on every PDF.
+            const maskW = Math.min(Math.max(d.maskW || iconFallback, iconFallback * 0.6), iconFallback * 1.5)
+            const maskH = Math.min(Math.max(d.maskH || iconFallback, iconFallback * 0.6), iconFallback * 1.5)
             return (
+              <div key={'mask-' + d.id} style={{
+                position: 'absolute',
+                left: d.x + getSizeForDevice(d.dtype) / 2 - maskW / 2,
+                top: d.y + getSizeForDevice(d.dtype) / 2 - maskH / 2,
+                width: maskW, height: maskH,
+                borderRadius: Math.min(maskW, maskH) / 2,
+                background: '#fdfdfb',
+                boxShadow: '0 0 3px 1px #fdfdfbdd',
+                pointerEvents: 'none',
+              }} />
+            )
+          })}
+
+          {devices.map(d => (
             <div key={d.id} className="sv-device" onMouseDown={e => handleDeviceMouseDown(e, d)}
               onDoubleClick={e => {
                 // Renaming normally happens via double-clicking the
@@ -801,20 +850,16 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                 const newLabel = prompt('Rename device:', d.label)
                 if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
               }}
-              style={{
-                position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-                // Fixed to the icon's own size, not auto-sized to
-                // whichever child is widest — otherwise hiding the
-                // (usually wider) label shrinks this box and
-                // re-centers the icon within it, visibly shifting the
-                // icon even though its actual x/y never changed. The
-                // label can still extend past this width since it
-                // stays centered and nothing here clips it.
-                width: deviceIconSize,
-              }}>
+              style={{ position: 'absolute', left: d.x, top: d.y, cursor: mode === 'select' ? 'move' : 'pointer', userSelect: 'none' }}>
               {(() => {
-                const sz = deviceIconSize
+                // Detected devices render smaller while awaiting review
+                // — the dashed amber outline + badge already flag them
+                // as "needs review," and full-size renders as a fairly
+                // busy shape at this scale (the RAK Gateway icon in
+                // particular is a dense 8-petal flower). Confirming a
+                // device drops `unconfirmed`, so it snaps back to the
+                // survey's normal icon size immediately.
+                const sz = getSizeForDevice(d.dtype) * (d.unconfirmed ? 0.55 : 1)
                 const status = d.status || 'existing'
                 const statusInfo = DEVICE_STATUSES[status] || DEVICE_STATUSES.existing
                 const isProposed = status === 'proposed'
@@ -827,14 +872,21 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                       width: sz, height: sz, borderRadius: Math.round(sz * 0.25), display: 'flex', alignItems: 'center', justifyContent: 'center',
                       background: sz > 8 ? d.color + '15' : 'transparent',
                       opacity: isRemoved ? 0.45 : 1,
-                      border: selectedId === d.id
-                        ? `${borderWidth}px solid ${d.color}`
-                        : `${borderWidth}px ${isProposed ? 'dashed' : 'solid'} ${isProposed ? statusInfo.color + '99' : 'transparent'}`,
-                      boxShadow: selectedId === d.id ? `0 0 0 2px ${d.color}33` : 'none'
+                      border: d.unconfirmed
+                        ? `${Math.max(borderWidth, 2)}px dashed #BA7517`
+                        : selectedId === d.id
+                          ? `${borderWidth}px solid ${d.color}`
+                          : `${borderWidth}px ${isProposed ? 'dashed' : 'solid'} ${isProposed ? statusInfo.color + '99' : 'transparent'}`,
+                      boxShadow: d.unconfirmed ? '0 0 0 3px #F0D48866' : (selectedId === d.id ? `0 0 0 2px ${d.color}33` : 'none')
                     }}>
                       <svg width={sz} height={sz} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths(d.dtype, d.color) }} />
                       {isRemoved && (
                         <div style={{ position: 'absolute', left: '10%', top: '48%', width: '80%', height: Math.max(1, Math.round(sz * 0.06)), background: statusInfo.color, transform: 'rotate(-15deg)' }} />
+                      )}
+                      {d.unconfirmed && (
+                        <div title="Detected automatically — needs review" style={{ position: 'absolute', top: -3, left: -3, width: Math.max(10, Math.round(sz * 0.35)), height: Math.max(10, Math.round(sz * 0.35)), borderRadius: '50%', background: '#BA7517', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <i className="ti ti-scan" style={{ fontSize: Math.max(6, Math.round(sz * 0.2)), color: '#fff' }} />
+                        </div>
                       )}
                       {d.photoUrl && sz >= 12 && (
                         <div style={{ position: 'absolute', top: -3, right: -3, width: Math.max(10, Math.round(sz * 0.35)), height: Math.max(10, Math.round(sz * 0.35)), borderRadius: '50%', background: '#378ADD', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -851,7 +903,10 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                           const newLabel = prompt('Rename device:', d.label)
                           if (newLabel !== null && newLabel.trim()) onDeviceMove(d.id, d.x, d.y, newLabel.trim())
                         }}
-                        style={{ fontSize: getLabelSizeForDevice(d.dtype), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: readOnly ? 'default' : 'text' }}>
+                        style={{
+                          position: 'absolute', top: sz + 2, left: '50%', transform: 'translateX(-50%)',
+                          fontSize: getLabelSizeForDevice(d.dtype), color: '#1a1a18', background: 'rgba(255,255,255,0.92)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #ddd', whiteSpace: 'nowrap', cursor: readOnly ? 'default' : 'text'
+                        }}>
                         {d.label}
                         {isProposed && <span style={{ color: statusInfo.color, marginLeft: 3 }}>•</span>}
                       </div>
@@ -860,21 +915,21 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
                 )
               })()}
             </div>
-            )
-          })}
+          ))}
 
           {/* Reference-floor ghost gateways — faint, non-interactive,
               purely for visual alignment/reference. Rendered inside
               the same transformed layer as real devices so they pan
-              and zoom identically. */}
+              and zoom identically, using the same icon-then-absolute-
+              label structure as real devices for consistent look. */}
           {ghostGateways.map((gw, i) => {
             const sz = getSizeForDevice('rak-gw')
             return (
-              <div key={`ghost-${i}`} style={{ position: 'absolute', left: gw.x, top: gw.y, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: 0.55, width: sz }}>
-                <div style={{ width: sz, height: sz, borderRadius: Math.round(sz * 0.25), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px dashed #378ADD', background: '#378ADD10' }}>
+              <div key={`ghost-${i}`} style={{ position: 'absolute', left: gw.x, top: gw.y, pointerEvents: 'none', opacity: 0.55 }}>
+                <div style={{ position: 'relative', width: sz, height: sz, borderRadius: Math.round(sz * 0.25), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px dashed #378ADD', background: '#378ADD10' }}>
                   <svg width={sz * 0.7} height={sz * 0.7} viewBox="0 0 34 34" dangerouslySetInnerHTML={{ __html: getIconPaths('rak-gw', '#378ADD') }} />
                 </div>
-                <div style={{ fontSize: 9, color: '#378ADD', background: 'rgba(255,255,255,0.9)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #378ADD55', whiteSpace: 'nowrap' }}>
+                <div style={{ position: 'absolute', top: sz + 2, left: '50%', transform: 'translateX(-50%)', fontSize: 9, color: '#378ADD', background: 'rgba(255,255,255,0.9)', padding: '1px 4px', borderRadius: 3, border: '0.5px solid #378ADD55', whiteSpace: 'nowrap' }}>
                   {gw.label} · {gw.sourceFloorName}
                 </div>
               </div>

@@ -1,32 +1,42 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getSurvey, getSurveyByToken, getSurveys, saveSurvey, createSurvey, uploadFloorPlan, uploadDevicePhoto, createShareToken, getProject, createPortMapperRack, getPortMapperRackDevices, updatePortMapperRackName, getProfileById } from '../lib/supabase'
-import { fitGeoTransform } from '../lib/geo'
 import { useAuth } from '../hooks/useAuth'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { DEVICE_DEFS, CABLE_STYLES, DeviceIcon, DEVICE_STATUSES, COLOR_PALETTE } from '../lib/devices'
 import { v4 as uuidv4 } from 'uuid'
-import { getPdfPageCount } from '../lib/pdf'
+import { getPdfPageCount, isPdfUrl } from '../lib/pdf'
+import { detectDevicesFromPdf } from '../lib/deviceDetection'
+import { detectMarkersByColor } from '../lib/colorDetect'
 import { buildSurveyPdfBlob, downloadBlob, safeFileName } from '../lib/exportPdf'
+import { fitGeoTransform } from '../lib/geo'
 
 // Sage Port Mapper's stable production URL.
 const NETWORK_MAPPER_URL = 'https://sage-port-mapper.vercel.app'
 const NETWORK_MAPPER_DTYPES = ['mdf', 'idf', 'switch']
 
-function getDefaultDeviceColor(dtype) {
+function getDeviceDef(dtype) {
   for (const section of DEVICE_DEFS) {
     const item = section.items.find(i => i.dtype === dtype)
-    if (item) return item.color
+    if (item) return item
   }
   return null
 }
+function getDefaultDeviceColor(dtype) {
+  return getDeviceDef(dtype)?.color || null
+}
 
-function getDeviceTypeLabel(dtype) {
-  for (const section of DEVICE_DEFS) {
-    const item = section.items.find(i => i.dtype === dtype)
-    if (item) return item.label
-  }
-  return null
+// Mirrors SurveyCanvas's getSizeForDevice category mapping — needed
+// here too since detected-device placement (color scan / AI detect)
+// has to center a new marker under its actual configured icon size,
+// not a stale hardcoded assumption, and this file doesn't share that
+// function with SurveyCanvas directly.
+function iconSizeForDtype(dtype, sizes) {
+  if (['reolink-fe', 'cam-dome', 'cam-bullet'].includes(dtype)) return sizes.cameras || 16
+  if (['rak-gw', 'rak-node'].includes(dtype)) return sizes.lora || 20
+  if (['mdf', 'idf', 'switch', 'ap', 'nvr', 'sage-equip'].includes(dtype)) return sizes.network || 20
+  if (['reader', 'intercom'].includes(dtype)) return sizes.access || 16
+  return 16
 }
 
 function networkMapperUrl(device) {
@@ -64,6 +74,13 @@ export default function SurveyEditor() {
   const [floorPlanUrl, setFloorPlanUrl] = useState('')
   const [floorPlanPage, setFloorPlanPage] = useState(1)
   const [floorPlanRotation, setFloorPlanRotation] = useState(0)
+
+  // AI device detection — scans an imported PDF floor plan for markers
+  // that are already drawn on it (e.g. a System Surveyor export) and
+  // adds them as real, editable devices flagged `unconfirmed: true`
+  // until the person reviews and confirms each one below.
+  const [detecting, setDetecting] = useState(false)
+  const [detectError, setDetectError] = useState('')
   const [iconSizes, setIconSizes] = useState({
     cameras: 16,
     lora: 20,
@@ -85,6 +102,12 @@ export default function SurveyEditor() {
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const [calibrating, setCalibrating] = useState(false)
+  const [measuring, setMeasuring] = useState(false)
+  const [showCopyScale, setShowCopyScale] = useState(false)
+  const [siblingSurveys, setSiblingSurveys] = useState([])
+  const [loadingSiblings, setLoadingSiblings] = useState(false)
+  const [selectedSiblings, setSelectedSiblings] = useState({})
+  const [copyingScale, setCopyingScale] = useState(false)
 
   // ── Stacking a gateway across floors ────────────────────────────────
   // "Stacking" means placing the same physical gateway at the matching
@@ -106,12 +129,6 @@ export default function SurveyEditor() {
   const [referenceFloorId, setReferenceFloorId] = useState('')
   const [showReferenceFloor, setShowReferenceFloor] = useState(false)
   const [referenceGhosts, setReferenceGhosts] = useState([]) // [{x, y, label, sourceFloorName}] already mapped into THIS survey's pixel space
-  const [measuring, setMeasuring] = useState(false)
-  const [showCopyScale, setShowCopyScale] = useState(false)
-  const [siblingSurveys, setSiblingSurveys] = useState([])
-  const [loadingSiblings, setLoadingSiblings] = useState(false)
-  const [selectedSiblings, setSelectedSiblings] = useState({})
-  const [copyingScale, setCopyingScale] = useState(false)
   const [copyScaleMsg, setCopyScaleMsg] = useState('')
   const [showCalibrateModal, setShowCalibrateModal] = useState(false)
   const [calibrateDistance, setCalibrateDistance] = useState('')
@@ -128,9 +145,9 @@ export default function SurveyEditor() {
   const [showShare, setShowShare] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
   const [showScale, setShowScale] = useState(false)
+  const [showKey, setShowKey] = useState(false)
   const [scaleInput, setScaleInput] = useState('4')
   const [showBOM, setShowBOM] = useState(false)
-  const [showKey, setShowKey] = useState(false)
   const [portMapperSiteId, setPortMapperSiteId] = useState(null)
 
   const fileInputRef = useRef(null)
@@ -177,7 +194,7 @@ export default function SurveyEditor() {
     if (data.label_sizes) {
       setLabelSizes(typeof data.label_sizes === 'object' ? data.label_sizes : {cameras:10,lora:13,network:10,access:10})
     }
-    setHiddenLabelTypes(Array.isArray(data.hidden_label_types) ? data.hidden_label_types : [])
+    setHiddenLabelTypes(Array.isArray(data.hidden_label_types) ? data.hidden_label_types : ['reolink-fe'])
     setLoading(false)
   }
 
@@ -353,6 +370,141 @@ export default function SurveyEditor() {
       })
     }
   }
+  const unconfirmedDevices = devices.filter(d => d.unconfirmed)
+
+  // For the Key/legend panel — one row per exact device type (not per
+  // category), so "RAK Gateway" and "Reolink Fisheye" show as separate
+  // counts, each in the same order they appear in the sidebar palette.
+  const deviceCountsByType = DEVICE_DEFS.flatMap(section => section.items)
+    .map(item => {
+      const matching = devices.filter(d => d.dtype === item.dtype)
+      return { ...item, count: matching.length, color: matching[0]?.color || item.color }
+    })
+    .filter(item => item.count > 0)
+
+  // Recolors every placed device of one type at once, from the Key
+  // panel — a per-survey override, not a change to the shared device
+  // palette defaults (which would otherwise affect every other survey
+  // too). New devices of this type placed afterward still start from
+  // the normal palette color unless changed again here.
+  function recolorDeviceType(dtype, newColor) {
+    updateDevices(devices.map(d => d.dtype === dtype ? { ...d, color: newColor } : d))
+  }
+  const isPdfFloorPlan = isPdfUrl(floorPlanUrl)
+
+  // Free, instant, no-API-key detection — matches the known marker
+  // color used by tools like System Surveyor and clusters matches into
+  // blobs. Finds WHERE markers are; can't read the "GW 74" text next
+  // to them, so detected devices default to Gateway (rak-gw, the type
+  // this color is actually used for on real exports) with a blank
+  // label for the person to fill in during review.
+  async function handleDetectDevicesByColor(urlOverride, pageOverride) {
+    // Defensive: only accept a real string override — guards against a
+    // handler being wired directly to onClick, which would otherwise
+    // pass the DOM click event itself as urlOverride.
+    const url = (typeof urlOverride === 'string' && urlOverride) || floorPlanUrl
+    const page = (typeof pageOverride === 'number' && pageOverride) || floorPlanPage
+    if (!url) return
+    setDetecting(true); setDetectError('')
+    const { markers, error } = await detectMarkersByColor(url, page)
+    setDetecting(false)
+    if (error) { setDetectError(error); return }
+    if (!markers.length) {
+      setSaveMsg('No matching purple markers found on this page')
+      setTimeout(() => setSaveMsg(''), 3500)
+      return
+    }
+    const def = getDeviceDef('rak-gw')
+    const halfIcon = iconSizeForDtype('rak-gw', iconSizes) / 2
+    const newDevices = markers.map(m => ({
+      id: uuidv4(),
+      dtype: 'rak-gw', label: '', color: def?.color || '#3B6D11',
+      coverage: def?.coverage || 0, heatmap: def?.heatmap || false,
+      x: m.x - halfIcon, y: m.y - halfIcon,
+      model: '', ip: '', notes: '', cost: 0, qty: 1, status: 'existing', photoUrl: '',
+      hmRangeFt: 120, hmStrength: 0.75,
+      unconfirmed: true,
+      // A soft patch drawn behind the icon (see SurveyCanvas) to cover
+      // the original flattened marker pixels underneath — sized to the
+      // actual detected blob plus generous padding, since the original
+      // export's icon+label combo is usually wider than just the dot.
+      // Flags this device for a cover patch over the original marker
+      // pixels underneath — see SurveyCanvas, which sizes the patch off
+      // the icon's own render size rather than anything measured here.
+      mask: true,
+    }))
+    updateDevices([...devices, ...newDevices])
+    setSaveMsg(`Detected ${newDevices.length} marker${newDevices.length === 1 ? '' : 's'} by color — review the highlighted devices below (labeled as Gateways by default, retype if any are actually IDF/MDF)`)
+    setTimeout(() => setSaveMsg(''), 6000)
+  }
+
+  async function handleDetectDevices(urlOverride, pageOverride) {
+    // Defensive: only accept a real string override — guards against a
+    // handler being wired directly to onClick, which would otherwise
+    // pass the DOM click event itself as urlOverride.
+    const url = (typeof urlOverride === 'string' && urlOverride) || floorPlanUrl
+    const page = (typeof pageOverride === 'number' && pageOverride) || floorPlanPage
+    if (!url) return
+    setDetecting(true); setDetectError('')
+    const { markers, error } = await detectDevicesFromPdf(url, page)
+    setDetecting(false)
+    if (error) { setDetectError(error); return }
+    if (!markers.length) {
+      setSaveMsg('No existing device markers detected on this page')
+      setTimeout(() => setSaveMsg(''), 3500)
+      return
+    }
+    const newDevices = markers.map(m => {
+      const def = getDeviceDef(m.dtype) || getDeviceDef('sage-equip')
+      const halfIcon = iconSizeForDtype(m.dtype, iconSizes) / 2
+      return {
+        id: uuidv4(),
+        dtype: m.dtype, label: m.label || '', color: def?.color || '#888780',
+        coverage: def?.coverage || 0, heatmap: def?.heatmap || false,
+        x: m.x - halfIcon, y: m.y - halfIcon,
+        model: '', ip: '', notes: '', cost: 0, qty: 1, status: 'existing', photoUrl: '',
+        hmRangeFt: 120, hmStrength: 0.75,
+        unconfirmed: true,
+        mask: true,
+        // AI detection can return a tight bounding box for the marker
+        // icon itself — when present, SurveyCanvas uses these instead
+        // of its icon-size-based guess for a more precisely fitted
+        // cover patch.
+        ...(m.maskW && m.maskH ? { maskW: m.maskW, maskH: m.maskH } : {}),
+      }
+    })
+    updateDevices([...devices, ...newDevices])
+    setSaveMsg(`Detected ${newDevices.length} device${newDevices.length === 1 ? '' : 's'} — review the highlighted markers below`)
+    setTimeout(() => setSaveMsg(''), 5000)
+  }
+  function confirmDetectedDevice(devId) {
+    patchDeviceById(devId, { unconfirmed: false })
+    const d = devices.find(x => x.id === devId)
+    if (d && NETWORK_MAPPER_DTYPES.includes(d.dtype) && portMapperSiteId && !d.portMapperRackId) {
+      createPortMapperRack(portMapperSiteId, d.rackId || d.label).then(({ rack, error }) => {
+        if (error) { console.warn('Port Mapper rack sync failed:', error); return }
+        if (rack?.id) patchDeviceById(devId, { portMapperRackId: rack.id })
+      })
+    }
+  }
+  function confirmAllDetectedDevices() {
+    unconfirmedDevices.forEach(d => confirmDetectedDevice(d.id))
+  }
+  function discardDetectedDevice(devId) {
+    updateDevices(devices.filter(d => d.id !== devId))
+    if (selectedId === devId) setSelectedId(null)
+  }
+  function discardAllDetectedDevices() {
+    updateDevices(devices.filter(d => !d.unconfirmed))
+  }
+  function retypeDetectedDevice(devId, newDtype) {
+    const def = getDeviceDef(newDtype)
+    patchDeviceById(devId, { dtype: newDtype, color: def?.color || '#888780', coverage: def?.coverage || 0, heatmap: def?.heatmap || false })
+  }
+  function relabelDetectedDevice(devId, newLabel) {
+    patchDeviceById(devId, { label: newLabel })
+  }
+
   function duplicateSelectedDevice() {
     if (!selectedDevice) return
     const copy = { ...selectedDevice, id: uuidv4(), x: selectedDevice.x + 24, y: selectedDevice.y + 24 }
@@ -460,9 +612,10 @@ export default function SurveyEditor() {
   }
 
   // ── Stacking a gateway across floors ────────────────────────────────
-  // Loaded automatically (not just when the Stack modal opens) since
-  // the "Reference floor" dropdown in the toolbar needs this same list
-  // available immediately too.
+  // ── Stacking a gateway across floors ────────────────────────────────
+  // Loaded automatically (not just when the Stack modal or Copy Scale
+  // modal open) since the "Reference floor" dropdown in the toolbar
+  // needs this same list available immediately too.
   useEffect(() => {
     if (!survey?.project_id) return
     getSurveys().then(({ data }) => {
@@ -474,6 +627,13 @@ export default function SurveyEditor() {
     setStackTargets({})
     setStackResults(null)
     setShowStackModal(true)
+    // Refresh the shared sibling-surveys list (also used by Copy
+    // Scale) so both features stay accurate without duplicating the
+    // fetch logic in two places.
+    if (survey?.project_id) {
+      const { data } = await getSurveys()
+      setSiblingSurveys((data || []).filter(s => s.project_id === survey.project_id && s.id !== id))
+    }
   }
 
   async function handleStackGateway() {
@@ -584,6 +744,15 @@ export default function SurveyEditor() {
     await saveSurvey(id, { floor_plan_url: url, floor_plan_page: 1 })
     setSaving(false); setSaveMsg('Floor plan uploaded'); setTimeout(() => setSaveMsg(''), 2500)
     e.target.value = ''
+
+    // Offer to scan it right away for markers already drawn on the
+    // plan — these come in as flattened pixels with no metadata, so
+    // detection is the only way to recover them as editable devices
+    // instead of re-placing everything by hand. Uses the free,
+    // instant color-matching detector — no API key required.
+    if (isPDF && window.confirm('Scan this PDF for existing device markers using AI (also reads each marker\'s label) and add them as editable devices you can review?')) {
+      handleDetectDevices(url, 1)
+    }
   }
 
   async function handleDeleteFloorPlan() {
@@ -715,32 +884,6 @@ export default function SurveyEditor() {
     return Object.values(grouped)
   }
 
-  // The "Key" panel — a legend of every device TYPE currently placed on
-  // this floor, with a count and its current icon color, plus a way to
-  // recolor every device of that type at once (e.g. standardizing
-  // colors before an export, rather than clicking through devices one
-  // at a time). Grouped by dtype specifically (not label+model like the
-  // BOM above), since color is a per-type visual property here.
-  function getDeviceTypeSummary() {
-    const grouped = {}
-    devices.forEach(d => {
-      if (!grouped[d.dtype]) {
-        // Canonical type label from DEVICE_DEFS, not the device's own
-        // (possibly renamed) label — a Dome camera renamed to "Front
-        // Door Cam" shouldn't make the whole type's legend entry say
-        // "Front Door Cam".
-        const def = getDeviceTypeLabel(d.dtype)
-        grouped[d.dtype] = { dtype: d.dtype, label: def || d.label, color: d.color, count: 0 }
-      }
-      grouped[d.dtype].count += 1
-    })
-    return Object.values(grouped).sort((a, b) => a.label.localeCompare(b.label))
-  }
-
-  function applyColorToDeviceType(dtype, color) {
-    updateDevices(devices.map(d => d.dtype === dtype ? { ...d, color } : d))
-  }
-
   const toolbarModes = isShared
     ? [{ id: 'select', icon: 'cursor-text', label: 'Select' }]
     : [
@@ -801,6 +944,18 @@ export default function SurveyEditor() {
                 <button style={{ ...tbBtn, color: '#1D9E75', borderColor: '#9AD9BE' }} onClick={() => navigate(`/survey/${id}/georeference`)} title="Overlay this floor plan on satellite imagery">
                   <i className="ti ti-map-pin" /> Georeference
                 </button>
+                {isPdfFloorPlan && (
+                  <button style={{ ...tbBtn, color: '#534AB7', borderColor: '#AFA9EC' }} onClick={() => handleDetectDevices()} disabled={detecting}
+                    title="Uses AI to find markers and read each one's label/type (e.g. distinguishing GW vs IDF text) — requires an ANTHROPIC_API_KEY set on the server">
+                    <i className={`ti ti-${detecting ? 'loader-2' : 'sparkles'}`} /> {detecting ? 'Detecting…' : 'Detect Devices'}
+                  </button>
+                )}
+                {floorPlanUrl && (
+                  <button style={{ ...tbBtn, color: '#BA7517', borderColor: '#F0D488', fontSize: 11 }} onClick={() => handleDetectDevicesByColor()} disabled={detecting}
+                    title="Free, no API key — finds markers by matching their color only, can't read label text (fallback for when AI detection isn't set up)">
+                    <i className="ti ti-scan" /> Quick Color Scan
+                  </button>
+                )}
               </>
             )}
             <input ref={fileInputRef} type="file" accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFloorPlanUpload} />
@@ -909,7 +1064,9 @@ export default function SurveyEditor() {
           title="Drag a line to measure a distance in feet">
           <i className="ti ti-ruler-3" /> {measuring ? 'Drag to measure…' : 'Measure'}
         </button>
-        <button style={tbBtn} onClick={() => setShowKey(true)} title="Device counts by type, and bulk-recolor a whole type at once">
+        <button style={{ ...tbBtn, ...(showKey ? { color: '#378ADD', borderColor: '#378ADD', background: '#E9F2FC' } : {}) }}
+          onClick={() => setShowKey(v => !v)}
+          title="Show a count of each device type placed on this floor plan">
           <i className="ti ti-list-details" /> Key
         </button>
         {!isShared && (
@@ -998,6 +1155,20 @@ export default function SurveyEditor() {
           </span>
           <button onClick={handleSaveNow} style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }}>
             <i className="ti ti-refresh" /> Retry save
+          </button>
+        </div>
+      )}
+
+      {detectError && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '8px 14px', background: '#FDECEC', borderBottom: '0.5px solid #F0AFAF',
+          fontSize: 12.5, color: '#7A1F1F', flexShrink: 0,
+        }}>
+          <i className="ti ti-alert-circle" style={{ color: '#A32D2D', fontSize: 15 }} />
+          <span style={{ flex: '1 1 320px' }}><strong>Device detection failed:</strong> {detectError}</span>
+          <button onClick={() => setDetectError('')} style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }}>
+            <i className="ti ti-x" /> Dismiss
           </button>
         </div>
       )}
@@ -1422,6 +1593,46 @@ export default function SurveyEditor() {
         </Modal>
       )}
 
+      {showStackModal && (
+        <Modal onClose={() => setShowStackModal(false)}>
+          <h3 style={modalTitle}>Stack gateway to other floors</h3>
+          <p style={{ fontSize: 12, color: '#666', marginBottom: 14, lineHeight: 1.5 }}>
+            Copies this gateway to the same real-world spot on the floors you pick, using each floor's georeferencing to match position when both are set — otherwise it falls back to the same pixel position.
+          </p>
+          {siblingSurveys.length === 0 ? (
+            <p style={{ fontSize: 12, color: '#aaa' }}>No other surveys in this project yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14, maxHeight: 240, overflow: 'auto' }}>
+              {siblingSurveys.map(s => (
+                <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '6px 8px', borderRadius: 6, background: '#f8f8f6', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!stackTargets[s.id]}
+                    onChange={e => setStackTargets(t => ({ ...t, [s.id]: e.target.checked }))} />
+                  {s.name}
+                  {s.geo_points?.length >= 2
+                    ? <span style={{ fontSize: 10, color: '#1D9E75', marginLeft: 'auto' }}>georeferenced</span>
+                    : <span style={{ fontSize: 10, color: '#BA7517', marginLeft: 'auto' }}>not georeferenced</span>}
+                </label>
+              ))}
+            </div>
+          )}
+          {stackResults && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 14 }}>
+              {stackResults.map((r, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: r.status === 'error' ? '#A32D2D' : r.status === 'skipped' ? '#888' : '#1D9E75' }}>
+                  <i className={`ti ti-${r.status === 'error' ? 'alert-circle' : r.status === 'skipped' ? 'minus' : 'circle-check'}`} /> {r.name} — {r.detail}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleStackGateway} disabled={stackingInProgress || Object.values(stackTargets).every(v => !v)} style={primaryBtn}>
+              {stackingInProgress ? 'Stacking…' : 'Stack to selected floors'}
+            </button>
+            <button onClick={() => setShowStackModal(false)} style={ghostBtn}>Close</button>
+          </div>
+        </Modal>
+      )}
+
       {showCopyScale && (
         <Modal onClose={() => setShowCopyScale(false)}>
           <h3 style={modalTitle}>Copy scale to other floors</h3>
@@ -1491,40 +1702,6 @@ export default function SurveyEditor() {
         </Modal>
       )}
 
-      {showKey && (
-        <Modal onClose={() => setShowKey(false)}>
-          <h3 style={modalTitle}>Key</h3>
-          <p style={{ fontSize: 11.5, color: '#888', marginTop: -6, marginBottom: 14 }}>
-            Every device type on this floor, with its count and current color. Click a swatch to recolor every device of that type at once.
-          </p>
-          {getDeviceTypeSummary().length === 0 ? (
-            <p style={{ fontSize: 12, color: '#aaa' }}>No devices placed yet.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '60vh', overflow: 'auto' }}>
-              {getDeviceTypeSummary().map(t => (
-                <div key={t.dtype} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: '#f8f8f6', border: '0.5px solid #e0dfd8' }}>
-                  <DeviceIcon dtype={t.dtype} color={t.color} size={22} />
-                  <span style={{ fontSize: 13, color: '#1a1a18', flex: 1 }}>{t.label}</span>
-                  <span style={{ fontSize: 11, color: '#888', background: '#fff', border: '0.5px solid #ddd', borderRadius: 12, padding: '2px 9px' }}>{t.count}</span>
-                  {!isShared && (
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxWidth: 180, justifyContent: 'flex-end' }}>
-                      {COLOR_PALETTE.map(c => (
-                        <button key={c} onClick={() => applyColorToDeviceType(t.dtype, c)} title={`Recolor all ${t.label} to ${c}`}
-                          style={{
-                            width: 17, height: 17, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
-                            border: t.color?.toLowerCase() === c.toLowerCase() ? '2px solid #1a1a18' : '1px solid rgba(0,0,0,0.15)',
-                          }} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          <button style={{ ...ghostBtn, marginTop: 14, width: '100%' }} onClick={() => setShowKey(false)}>Close</button>
-        </Modal>
-      )}
-
       {showBOM && (
         <Modal onClose={() => setShowBOM(false)} wide>
           <h3 style={modalTitle}>Bill of materials</h3>
@@ -1558,46 +1735,6 @@ export default function SurveyEditor() {
         </Modal>
       )}
 
-      {showStackModal && (
-        <Modal onClose={() => setShowStackModal(false)}>
-          <h3 style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>Stack gateway to other floors</h3>
-          <p style={{ fontSize: 11.5, color: '#888', marginBottom: 14 }}>
-            Copies this gateway to the same real-world spot on the floors you pick, using each floor's georeferencing to match position when both are set — otherwise it falls back to the same pixel position.
-          </p>
-          {siblingSurveys.length === 0 ? (
-            <p style={{ fontSize: 12, color: '#aaa' }}>No other surveys in this project yet.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14, maxHeight: 240, overflow: 'auto' }}>
-              {siblingSurveys.map(s => (
-                <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '6px 8px', borderRadius: 6, background: '#f8f8f6', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!!stackTargets[s.id]}
-                    onChange={e => setStackTargets(t => ({ ...t, [s.id]: e.target.checked }))} />
-                  {s.name}
-                  {s.geo_points?.length >= 2
-                    ? <span style={{ fontSize: 10, color: '#1D9E75', marginLeft: 'auto' }}>georeferenced</span>
-                    : <span style={{ fontSize: 10, color: '#BA7517', marginLeft: 'auto' }}>not georeferenced</span>}
-                </label>
-              ))}
-            </div>
-          )}
-          {stackResults && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 14 }}>
-              {stackResults.map((r, i) => (
-                <div key={i} style={{ fontSize: 11.5, color: r.status === 'error' ? '#A32D2D' : r.status === 'skipped' ? '#888' : '#1D9E75' }}>
-                  <i className={`ti ti-${r.status === 'error' ? 'alert-circle' : r.status === 'skipped' ? 'minus' : 'circle-check'}`} /> {r.name} — {r.detail}
-                </div>
-              ))}
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleStackGateway} disabled={stackingInProgress || Object.values(stackTargets).every(v => !v)} style={primaryBtn}>
-              {stackingInProgress ? 'Stacking…' : 'Stack to selected floors'}
-            </button>
-            <button onClick={() => setShowStackModal(false)} style={ghostBtn}>Close</button>
-          </div>
-        </Modal>
-      )}
-
       {showNetworkMapper && selectedDevice && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}
           onClick={e => { if (e.target === e.currentTarget) setShowNetworkMapper(false) }}>
@@ -1628,6 +1765,96 @@ export default function SurveyEditor() {
             <div style={{ padding: '6px 16px', fontSize: 10.5, color: '#aaa', borderTop: '0.5px solid #f0efea' }}>
               If this doesn't load, the other app may block embedding — use "Open in new tab" instead.
             </div>
+          </div>
+        </div>
+      )}
+
+      {showKey && (
+        <div style={{
+          position: 'fixed', left: 190, bottom: 16, width: 230, maxHeight: 380,
+          background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10,
+          boxShadow: '0 4px 18px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column',
+          zIndex: 40, overflow: 'hidden',
+        }}>
+          <div style={{ padding: '9px 12px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <i className="ti ti-list-details" style={{ color: '#378ADD', fontSize: 15 }} />
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a18', flex: 1 }}>Key</div>
+            <button onClick={() => setShowKey(false)} style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer', padding: 2 }}>
+              <i className="ti ti-x" style={{ fontSize: 14 }} />
+            </button>
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {deviceCountsByType.length === 0 ? (
+              <div style={{ padding: '16px 12px', fontSize: 12, color: '#aaa', textAlign: 'center' }}>No devices placed yet.</div>
+            ) : deviceCountsByType.map(item => (
+              <div key={item.dtype} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '0.5px solid #f0efea' }}>
+                <div style={{ width: 24, height: 24, borderRadius: 6, background: item.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <DeviceIcon dtype={item.dtype} color={item.color} size={16} />
+                </div>
+                <span style={{ fontSize: 12.5, color: '#333', flex: 1 }}>{item.label}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#1a1a18', marginRight: 2 }}>{item.count}</span>
+                <input type="color" value={item.color} disabled={isShared}
+                  onChange={e => recolorDeviceType(item.dtype, e.target.value)}
+                  title={`Change the color of all ${item.count} ${item.label} device${item.count === 1 ? '' : 's'} on this map`}
+                  style={{ width: 20, height: 20, padding: 0, border: '0.5px solid #ccc', borderRadius: 4, cursor: isShared ? 'default' : 'pointer', flexShrink: 0 }} />
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: '7px 12px', borderTop: '0.5px solid #f0efea', fontSize: 11, color: '#888', display: 'flex', justifyContent: 'space-between' }}>
+            <span>Total</span>
+            <span style={{ fontWeight: 600, color: '#1a1a18' }}>{devices.length}</span>
+          </div>
+        </div>
+      )}
+
+      {unconfirmedDevices.length > 0 && (
+        <div style={{
+          position: 'fixed', right: 190, bottom: 16, width: 300, maxHeight: 380,
+          background: '#fff', border: '0.5px solid #F0D488', borderRadius: 10,
+          boxShadow: '0 4px 18px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column',
+          zIndex: 40, overflow: 'hidden',
+        }}>
+          <div style={{ padding: '9px 12px', background: '#FFF7E6', borderBottom: '0.5px solid #F0D488', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <i className="ti ti-scan" style={{ color: '#BA7517', fontSize: 15 }} />
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#5A4200', flex: 1, lineHeight: 1.3 }}>
+              {unconfirmedDevices.length} detected device{unconfirmedDevices.length === 1 ? '' : 's'} to review
+            </div>
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {unconfirmedDevices.map(d => (
+              <div key={d.id} style={{ padding: '7px 12px', borderBottom: '0.5px solid #f0efe9' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                  <div onClick={() => handleDeviceSelect(d.id)} title="Locate on canvas"
+                    style={{ width: 26, height: 26, borderRadius: 6, background: d.color + '20', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}>
+                    <DeviceIcon dtype={d.dtype} color={d.color} size={18} />
+                  </div>
+                  <select value={d.dtype} onChange={e => retypeDetectedDevice(d.id, e.target.value)}
+                    style={{ fontSize: 11, flex: 1, border: '0.5px solid #ddd', borderRadius: 4, padding: '3px 4px', minWidth: 0 }}>
+                    {DEVICE_DEFS.flatMap(section => section.items).map(item => (
+                      <option key={item.dtype} value={item.dtype}>{item.label}</option>
+                    ))}
+                  </select>
+                  <button onClick={() => confirmDetectedDevice(d.id)} title="Confirm this device"
+                    style={{ background: 'none', border: 'none', color: '#1D9E75', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+                    <i className="ti ti-check" style={{ fontSize: 15 }} />
+                  </button>
+                  <button onClick={() => discardDetectedDevice(d.id)} title="Discard — not a real device"
+                    style={{ background: 'none', border: 'none', color: '#A32D2D', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+                    <i className="ti ti-x" style={{ fontSize: 15 }} />
+                  </button>
+                </div>
+                <input value={d.label} placeholder="Label (e.g. IDF 1-1)" onChange={e => relabelDetectedDevice(d.id, e.target.value)}
+                  style={{ fontSize: 11, width: '100%', border: '0.5px solid #ddd', borderRadius: 4, padding: '3px 6px', boxSizing: 'border-box' }} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 6, padding: '8px 12px', borderTop: '0.5px solid #f0efe9' }}>
+            <button onClick={confirmAllDetectedDevices} style={{ ...tbBtn, flex: 1, justifyContent: 'center', color: '#1D9E75', borderColor: '#9AD9BE' }}>
+              <i className="ti ti-checks" /> Confirm all
+            </button>
+            <button onClick={discardAllDetectedDevices} style={{ ...tbBtn, flex: 1, justifyContent: 'center', color: '#A32D2D', borderColor: '#F09595' }}>
+              <i className="ti ti-trash" /> Discard all
+            </button>
           </div>
         </div>
       )}

@@ -12,6 +12,7 @@ import {
   getEnterprises, createEnterprise, renameEnterprise, deleteEnterprise, setProjectEnterprise,
 } from '../lib/supabase'
 import { geocodeAddress } from '../lib/geocode'
+import { DEVICE_DEFS } from '../lib/devices'
 
 export default function Dashboard() {
   const { user, isAdmin } = useAuth()
@@ -19,7 +20,7 @@ export default function Dashboard() {
   const [surveys, setSurveys] = useState([])
   const [projects, setProjects] = useState([])
   const [enterprises, setEnterprises] = useState([])
-  const [expandedEnterprises, setExpandedEnterprises] = useState({}) // default-open; only tracks explicit collapses
+  const [expandedEnterprises, setExpandedEnterprises] = useState({}) // default-collapsed; only tracks explicit expansions
   const [showNewEnterprise, setShowNewEnterprise] = useState(false)
   const [newEnterpriseName, setNewEnterpriseName] = useState('')
   const [creatingEnterprise, setCreatingEnterprise] = useState(false)
@@ -47,6 +48,7 @@ export default function Dashboard() {
   // Expanded projects
   const [expanded, setExpanded] = useState({})
   const [uploadingPlanFor, setUploadingPlanFor] = useState(null) // project id currently uploading
+  const [folderImportProgress, setFolderImportProgress] = useState(null) // { projectId, done, total } while a batch import is running
 
   // Click-to-edit project name — mirrors the survey editor's rename
   // pattern (click name, edit inline, blur/Enter to save).
@@ -66,6 +68,7 @@ export default function Dashboard() {
   const [inviteError, setInviteError] = useState('')
   const [inviteInfo, setInviteInfo] = useState('')
   const floorPlanInputRef = useRef(null)
+  const folderImportInputRef = useRef(null)
   const pendingProjectRef = useRef(null)
 
   useEffect(() => {
@@ -259,6 +262,71 @@ export default function Dashboard() {
     loadAll()
   }
 
+  function triggerFolderImport(project) {
+    pendingProjectRef.current = project
+    folderImportInputRef.current.click()
+  }
+
+  // Imports every floor plan file found in a selected folder (or
+  // multi-select) in one go — one survey per file, with the same
+  // per-file "split a multi-page PDF into one survey per floor" logic
+  // handleFloorPlanFileChange already applies to a single upload.
+  // Runs sequentially rather than in parallel so a slow/large file
+  // doesn't race the DB writes for the ones before it, and so progress
+  // can be reported file-by-file.
+  async function handleFolderImportChange(e) {
+    const rawFiles = Array.from(e.target.files || [])
+    e.target.value = ''
+    const project = pendingProjectRef.current
+    pendingProjectRef.current = null
+    if (!rawFiles.length || !project) return
+
+    // A folder picker returns everything in the folder, not just floor
+    // plans — filter down to images/PDFs and skip OS clutter like
+    // .DS_Store or Thumbs.db, then process in a stable, readable order.
+    const files = rawFiles
+      .filter(f => f.type === 'application/pdf' || f.type.startsWith('image/') || /\.(pdf|png|jpe?g|gif|webp)$/i.test(f.name))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+
+    if (!files.length) { setError('No image or PDF files found in that folder'); return }
+
+    setError(''); setInfo('')
+    setFolderImportProgress({ projectId: project.id, done: 0, total: files.length })
+
+    let totalCreated = 0
+    let filesWithErrors = []
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      setFolderImportProgress({ projectId: project.id, done: i, total: files.length })
+      const tempId = uuidv4()
+      const { url, error: uploadErr } = await uploadFloorPlan(tempId, file)
+      if (uploadErr) { filesWithErrors.push(file.name); continue }
+
+      const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+      let pageCount = 1
+      if (isPDF) {
+        try { pageCount = await getPdfPageCount(url) } catch (err) { console.warn(`Could not read page count for ${file.name}:`, err) }
+      }
+
+      const baseName = file.name.replace(/\.[^.]+$/, '')
+      for (let p = 1; p <= pageCount; p++) {
+        const name = pageCount > 1 ? `${baseName} — Floor ${p}` : baseName
+        const { data: newSurvey, error: createErr } = await createSurvey(user.id, name, project.id)
+        if (createErr || !newSurvey) { console.warn(`Couldn't create survey for ${file.name} (page ${p}):`, createErr); continue }
+        const { error: saveErr } = await saveSurvey(newSurvey.id, { floor_plan_url: url, floor_plan_page: p })
+        if (!saveErr) totalCreated++
+      }
+    }
+
+    setFolderImportProgress(null)
+    const skipped = filesWithErrors.length
+    setInfo(skipped === 0
+      ? `Imported ${totalCreated} survey${totalCreated !== 1 ? 's' : ''} from ${files.length} file${files.length !== 1 ? 's' : ''}`
+      : `Imported ${totalCreated} survey${totalCreated !== 1 ? 's' : ''} — ${skipped} file${skipped !== 1 ? 's' : ''} failed to upload (${filesWithErrors.join(', ')})`)
+    setTimeout(() => setInfo(''), skipped ? 8000 : 4000)
+    loadAll()
+  }
+
   async function openShareModal(project) {
     setShareProject(project)
     setInviteEmail(''); setInviteError(''); setInviteInfo('')
@@ -391,6 +459,7 @@ export default function Dashboard() {
         {error && <p style={{ fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{error}</p>}
         {info && <p style={{ fontSize: 12, color: '#0F6E56', background: '#E1F5EE', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{info}</p>}
         <input ref={floorPlanInputRef} type="file" accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFloorPlanFileChange} />
+        <input ref={folderImportInputRef} type="file" webkitdirectory="" directory="" multiple accept="image/*,.pdf,application/pdf" style={{ display: 'none' }} onChange={handleFolderImportChange} />
 
         {/* New enterprise form */}
         {showNewEnterprise && (
@@ -445,6 +514,26 @@ export default function Dashboard() {
               const projectSurveys = surveys.filter(s => s.project_id === project.id)
               const isOpen = expanded[project.id]
               const isMine = project.user_id === user.id
+
+              // Equipment counts across every survey in this project —
+              // "Cameras" covers every camera dtype in that palette
+              // section (Reolink Fisheye, Dome, Bullet). Gateways and
+              // Nodes are separate LoRa/IoT device types (a Node is
+              // not a Gateway), and MDF/IDF are their own network
+              // dtypes — kept as four distinct counts rather than
+              // folded together, since they're different equipment
+              // with different quantities/costs in practice.
+              const cameraDtypes = DEVICE_DEFS.find(s => s.section === 'Cameras')?.items.map(i => i.dtype) || []
+              let cameraCount = 0, gatewayCount = 0, nodeCount = 0, mdfCount = 0, idfCount = 0
+              for (const s of projectSurveys) {
+                for (const d of (Array.isArray(s.devices) ? s.devices : [])) {
+                  if (cameraDtypes.includes(d.dtype)) cameraCount++
+                  else if (d.dtype === 'rak-gw') gatewayCount++
+                  else if (d.dtype === 'rak-node') nodeCount++
+                  else if (d.dtype === 'mdf') mdfCount++
+                  else if (d.dtype === 'idf') idfCount++
+                }
+              }
               return (
                 <div key={project.id} style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', cursor: 'pointer', background: '#f8f8f6' }}
@@ -502,10 +591,52 @@ export default function Dashboard() {
                       </select>
                     )}
                     <span style={{ fontSize: 11, color: '#888' }}>{projectSurveys.length} survey{projectSurveys.length !== 1 ? 's' : ''}</span>
+                    {(gatewayCount > 0 || nodeCount > 0 || mdfCount > 0 || idfCount > 0 || cameraCount > 0) && (
+                      <span style={{ display: 'flex', gap: 10, fontSize: 11, color: '#888' }}>
+                        {gatewayCount > 0 && (
+                          <span title="RAK Gateways across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <i className="ti ti-antenna-bars-5" style={{ fontSize: 12, color: '#3B6D11' }} />
+                            <strong style={{ color: '#1a1a18' }}>{gatewayCount}</strong> RAK Gateway{gatewayCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {nodeCount > 0 && (
+                          <span title="RAK Nodes across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <i className="ti ti-router" style={{ fontSize: 12, color: '#3B6D11' }} />
+                            <strong style={{ color: '#1a1a18' }}>{nodeCount}</strong> RAK Node{nodeCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {mdfCount > 0 && (
+                          <span title="MDFs across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <i className="ti ti-server-2" style={{ fontSize: 12, color: '#C21E7A' }} />
+                            <strong style={{ color: '#1a1a18' }}>{mdfCount}</strong> MDF{mdfCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {idfCount > 0 && (
+                          <span title="IDFs across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <i className="ti ti-server-2" style={{ fontSize: 12, color: '#E85BAE' }} />
+                            <strong style={{ color: '#1a1a18' }}>{idfCount}</strong> IDF{idfCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {cameraCount > 0 && (
+                          <span title="Cameras (Reolink Fisheye, Dome, Bullet) across all surveys in this project" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <i className="ti ti-camera" style={{ fontSize: 12, color: '#378ADD' }} />
+                            <strong style={{ color: '#1a1a18' }}>{cameraCount}</strong> Camera{cameraCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </span>
+                    )}
                     <button onClick={e => { e.stopPropagation(); triggerFloorPlanUpload(project) }}
                       disabled={uploadingPlanFor === project.id}
                       style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
                       {uploadingPlanFor === project.id ? 'Uploading…' : '+ Floor plan'}
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); triggerFolderImport(project) }}
+                      disabled={folderImportProgress?.projectId === project.id}
+                      title="Select a folder of floor plans (PDFs/images) and create one survey per file"
+                      style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
+                      {folderImportProgress?.projectId === project.id
+                        ? `Importing ${folderImportProgress.done + 1}/${folderImportProgress.total}…`
+                        : (<><i className="ti ti-folder-plus" style={{ marginRight: 3 }} /> Import folder</>)}
                     </button>
                     <button onClick={e => { e.stopPropagation(); setNewSurveyProject(project.id); setShowNewSurvey(true) }}
                       style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>+ Survey</button>
@@ -593,7 +724,7 @@ export default function Dashboard() {
           return (
             <>
               {enterpriseSections.map(({ enterprise, projects: entProjects }) => {
-                const isEntOpen = expandedEnterprises[enterprise.id] !== false // default open
+                const isEntOpen = expandedEnterprises[enterprise.id] === true // default collapsed
                 const isEntMine = enterprise.user_id === user.id
                 return (
                   <div key={enterprise.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
