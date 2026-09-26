@@ -21,6 +21,14 @@ function getDefaultDeviceColor(dtype) {
   return null
 }
 
+function getDeviceTypeLabel(dtype) {
+  for (const section of DEVICE_DEFS) {
+    const item = section.items.find(i => i.dtype === dtype)
+    if (item) return item.label
+  }
+  return null
+}
+
 function networkMapperUrl(device) {
   if (!device?.rackId) return NETWORK_MAPPER_URL
   // Adjust this once we know Sage Port Mapper's actual deep-link format
@@ -122,6 +130,7 @@ export default function SurveyEditor() {
   const [showScale, setShowScale] = useState(false)
   const [scaleInput, setScaleInput] = useState('4')
   const [showBOM, setShowBOM] = useState(false)
+  const [showKey, setShowKey] = useState(false)
   const [portMapperSiteId, setPortMapperSiteId] = useState(null)
 
   const fileInputRef = useRef(null)
@@ -706,6 +715,32 @@ export default function SurveyEditor() {
     return Object.values(grouped)
   }
 
+  // The "Key" panel — a legend of every device TYPE currently placed on
+  // this floor, with a count and its current icon color, plus a way to
+  // recolor every device of that type at once (e.g. standardizing
+  // colors before an export, rather than clicking through devices one
+  // at a time). Grouped by dtype specifically (not label+model like the
+  // BOM above), since color is a per-type visual property here.
+  function getDeviceTypeSummary() {
+    const grouped = {}
+    devices.forEach(d => {
+      if (!grouped[d.dtype]) {
+        // Canonical type label from DEVICE_DEFS, not the device's own
+        // (possibly renamed) label — a Dome camera renamed to "Front
+        // Door Cam" shouldn't make the whole type's legend entry say
+        // "Front Door Cam".
+        const def = getDeviceTypeLabel(d.dtype)
+        grouped[d.dtype] = { dtype: d.dtype, label: def || d.label, color: d.color, count: 0 }
+      }
+      grouped[d.dtype].count += 1
+    })
+    return Object.values(grouped).sort((a, b) => a.label.localeCompare(b.label))
+  }
+
+  function applyColorToDeviceType(dtype, color) {
+    updateDevices(devices.map(d => d.dtype === dtype ? { ...d, color } : d))
+  }
+
   const toolbarModes = isShared
     ? [{ id: 'select', icon: 'cursor-text', label: 'Select' }]
     : [
@@ -873,6 +908,9 @@ export default function SurveyEditor() {
           onClick={() => measuring ? setMeasuring(false) : startMeasure()}
           title="Drag a line to measure a distance in feet">
           <i className="ti ti-ruler-3" /> {measuring ? 'Drag to measure…' : 'Measure'}
+        </button>
+        <button style={tbBtn} onClick={() => setShowKey(true)} title="Device counts by type, and bulk-recolor a whole type at once">
+          <i className="ti ti-list-details" /> Key
         </button>
         {!isShared && (
           <button style={tbBtn} onClick={() => setShowScale(true)} title="Manually enter px/ft">
@@ -1450,6 +1488,40 @@ export default function SurveyEditor() {
             <button style={primaryBtn} onClick={() => { navigator.clipboard.writeText(shareUrl).catch(() => {}) }}>Copy</button>
           </div>
           <button style={ghostBtn} onClick={() => setShowShare(false)}>Close</button>
+        </Modal>
+      )}
+
+      {showKey && (
+        <Modal onClose={() => setShowKey(false)}>
+          <h3 style={modalTitle}>Key</h3>
+          <p style={{ fontSize: 11.5, color: '#888', marginTop: -6, marginBottom: 14 }}>
+            Every device type on this floor, with its count and current color. Click a swatch to recolor every device of that type at once.
+          </p>
+          {getDeviceTypeSummary().length === 0 ? (
+            <p style={{ fontSize: 12, color: '#aaa' }}>No devices placed yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '60vh', overflow: 'auto' }}>
+              {getDeviceTypeSummary().map(t => (
+                <div key={t.dtype} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: '#f8f8f6', border: '0.5px solid #e0dfd8' }}>
+                  <DeviceIcon dtype={t.dtype} color={t.color} size={22} />
+                  <span style={{ fontSize: 13, color: '#1a1a18', flex: 1 }}>{t.label}</span>
+                  <span style={{ fontSize: 11, color: '#888', background: '#fff', border: '0.5px solid #ddd', borderRadius: 12, padding: '2px 9px' }}>{t.count}</span>
+                  {!isShared && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxWidth: 180, justifyContent: 'flex-end' }}>
+                      {COLOR_PALETTE.map(c => (
+                        <button key={c} onClick={() => applyColorToDeviceType(t.dtype, c)} title={`Recolor all ${t.label} to ${c}`}
+                          style={{
+                            width: 17, height: 17, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
+                            border: t.color?.toLowerCase() === c.toLowerCase() ? '2px solid #1a1a18' : '1px solid rgba(0,0,0,0.15)',
+                          }} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <button style={{ ...ghostBtn, marginTop: 14, width: '100%' }} onClick={() => setShowKey(false)}>Close</button>
         </Modal>
       )}
 
