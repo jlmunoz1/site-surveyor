@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { getSurvey, getProject, saveSurvey } from '../lib/supabase'
+import { getSurvey, getSurveys, getProject, saveSurvey } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { fitGeoTransform, computeCorners, estimateScale } from '../lib/geo'
 import { rotatedImageOverlay } from '../lib/RotatedImageOverlay'
@@ -63,6 +63,18 @@ export default function GeoReference() {
   const [overlayImageSrc, setOverlayImageSrc] = useState(null) // dataURL fed to the map overlay
   const [planLoadError, setPlanLoadError] = useState('')
 
+  // ── Copy this georeferencing to other floors ────────────────────────
+  // Only makes sense/is accurate when the target floor's scan shares
+  // the same scale, crop, and rotation as this one — common within a
+  // single architectural drawing set (e.g. "Level 1/2/3" pages from
+  // the same PDF export), but not guaranteed. The modal says this
+  // plainly rather than silently copying something that might not fit.
+  const [siblingSurveys, setSiblingSurveys] = useState([])
+  const [showCopyGeoModal, setShowCopyGeoModal] = useState(false)
+  const [copyGeoTargets, setCopyGeoTargets] = useState({})
+  const [copyingGeo, setCopyingGeo] = useState(false)
+  const [copyGeoResults, setCopyGeoResults] = useState(null)
+
   const planCanvasRef = useRef(null)
   const planContainerRef = useRef(null)
   const sourceRef = useRef(null) // { kind: 'image'|'pdf', img?, canvas?, displayScale? }
@@ -98,7 +110,28 @@ export default function GeoReference() {
         const { lat, lng } = await geocodeAddress(project.address)
         if (lat != null) setSiteLocation({ lat, lng })
       }
+      const { data: allSurveys } = await getSurveys()
+      setSiblingSurveys((allSurveys || []).filter(s => s.project_id === data.project_id && s.id !== id))
     }
+  }
+
+  async function handleCopyGeoreference() {
+    const targetIds = Object.keys(copyGeoTargets).filter(tid => copyGeoTargets[tid])
+    if (targetIds.length === 0 || points.length < 2) return
+    setCopyingGeo(true)
+    const results = []
+    for (const targetId of targetIds) {
+      const target = siblingSurveys.find(s => s.id === targetId)
+      if (!target) continue
+      const { error } = await saveSurvey(targetId, {
+        geo_points: points,
+        geo_corners: corners || null,
+        geo_opacity: opacity,
+      }, { updatedBy: user?.id })
+      results.push({ name: target.name, status: error ? 'error' : 'success', detail: error?.message })
+    }
+    setCopyingGeo(false)
+    setCopyGeoResults(results)
   }
 
   // ── Load the floor plan source (image or PDF page) and draw it ─────
@@ -581,8 +614,63 @@ export default function GeoReference() {
               </div>
             </div>
           )}
+          {points.length >= 2 && (
+            <div style={{ padding: '10px 12px', borderTop: '0.5px solid #e0dfd8' }}>
+              <button
+                onClick={() => { setCopyGeoTargets({}); setCopyGeoResults(null); setShowCopyGeoModal(true) }}
+                style={{ ...ghostBtnSmall, width: '100%' }}
+              >
+                <i className="ti ti-copy" style={{ marginRight: 4 }} /> Copy this georeference to other floors
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {showCopyGeoModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ background: '#fff', borderRadius: 10, padding: 20, width: 380, maxHeight: '80vh', overflow: 'auto' }}>
+            <h3 style={{ fontSize: 15, fontWeight: 500, margin: '0 0 4px', color: '#1a1a18' }}>Copy georeference to other floors</h3>
+            <p style={{ fontSize: 12, color: '#666', marginBottom: 4, lineHeight: 1.5 }}>
+              Copies these exact {points.length} control points (and the resulting map overlay position) to the floors you pick.
+            </p>
+            <p style={{ fontSize: 11.5, color: '#BA7517', marginBottom: 14, lineHeight: 1.5, background: '#FFF7E6', padding: '8px 10px', borderRadius: 6 }}>
+              <i className="ti ti-alert-triangle" /> This only lines up correctly if the target floor's scan shares the same scale, crop, and rotation as this one — true for many multi-floor drawing sets, but not guaranteed. Check the result on each floor after copying.
+            </p>
+            {siblingSurveys.length === 0 ? (
+              <p style={{ fontSize: 12, color: '#aaa' }}>No other surveys in this project yet.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14, maxHeight: 220, overflow: 'auto' }}>
+                {siblingSurveys.map(s => (
+                  <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '6px 8px', borderRadius: 6, background: '#f8f8f6', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={!!copyGeoTargets[s.id]}
+                      onChange={e => setCopyGeoTargets(t => ({ ...t, [s.id]: e.target.checked }))} />
+                    {s.name}
+                    {s.geo_points?.length >= 2 && (
+                      <span style={{ fontSize: 10, color: '#BA7517', marginLeft: 'auto' }}>already georeferenced — will overwrite</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            )}
+            {copyGeoResults && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 14 }}>
+                {copyGeoResults.map((r, i) => (
+                  <div key={i} style={{ fontSize: 11.5, color: r.status === 'error' ? '#A32D2D' : '#1D9E75' }}>
+                    <i className={`ti ti-${r.status === 'error' ? 'alert-circle' : 'circle-check'}`} /> {r.name}{r.detail ? ` — ${r.detail}` : ''}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={handleCopyGeoreference} disabled={copyingGeo || Object.values(copyGeoTargets).every(v => !v)} style={primaryBtn}>
+                {copyingGeo ? 'Copying…' : 'Copy to selected floors'}
+              </button>
+              <button onClick={() => setShowCopyGeoModal(false)} style={ghostBtn}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
