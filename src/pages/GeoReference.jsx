@@ -628,7 +628,7 @@ export default function GeoReference() {
       </div>
 
       {showCopyGeoModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
           <div style={{ background: '#fff', borderRadius: 10, padding: 20, width: 380, maxHeight: '80vh', overflow: 'auto' }}>
             <h3 style={{ fontSize: 15, fontWeight: 500, margin: '0 0 4px', color: '#1a1a18' }}>Copy georeference to other floors</h3>
             <p style={{ fontSize: 12, color: '#666', marginBottom: 4, lineHeight: 1.5 }}>
