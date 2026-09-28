@@ -537,7 +537,7 @@ export default function Dashboard() {
               }
               return (
                 <div key={project.id} style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', cursor: 'pointer', background: '#f8f8f6' }}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', cursor: 'pointer', background: '#f8f8f6', flexWrap: 'wrap' }}
                     onClick={() => setExpanded(e => ({ ...e, [project.id]: !e[project.id] }))}>
                     <i className={`ti ti-chevron-${isOpen ? 'down' : 'right'}`} style={{ fontSize: 14, color: '#888' }} />
                     <i className="ti ti-folder" style={{ fontSize: 16, color: '#534AB7' }} />
@@ -645,13 +645,13 @@ export default function Dashboard() {
                     </button>
                     <button onClick={e => { e.stopPropagation(); setNewSurveyProject(project.id); setShowNewSurvey(true) }}
                       style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>+ Survey</button>
-                    {isMine && (
+                    {(isMine || isAdmin) && (
                       <button onClick={e => { e.stopPropagation(); openShareModal(project) }}
                         style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
                         <i className="ti ti-user-plus" style={{ marginRight: 3 }} /> Share
                       </button>
                     )}
-                    {isMine && (
+                    {(isMine || isAdmin) && (
                       <button onClick={e => { e.stopPropagation(); handleDeleteProject(project.id, project.name) }}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ccc', fontSize: 14, padding: '2px 4px' }}>
                         <i className="ti ti-trash" />
