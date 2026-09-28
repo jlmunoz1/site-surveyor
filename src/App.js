@@ -42,6 +42,7 @@ export default function App() {
           <Route path="/survey/:id" element={<ProtectedRoute><SurveyEditor /></ProtectedRoute>} />
           <Route path="/survey/:id/georeference" element={<ProtectedRoute><GeoReference /></ProtectedRoute>} />
           <Route path="/enterprise/:id/export" element={<ProtectedRoute><BulkExport /></ProtectedRoute>} />
+          <Route path="/project/:id/export" element={<ProtectedRoute><BulkExport /></ProtectedRoute>} />
           <Route path="/shared/:token" element={<SurveyEditor />} />
           <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
           <Route path="/reset-password" element={<ProtectedRoute><ResetPasswordPage /></ProtectedRoute>} />

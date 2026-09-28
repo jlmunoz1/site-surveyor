@@ -626,6 +626,10 @@ export default function Dashboard() {
                         )}
                       </span>
                     )}
+                    <button onClick={e => { e.stopPropagation(); navigate(`/project/${project.id}/export`) }}
+                      style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>
+                      <i className="ti ti-download" style={{ marginRight: 3 }} /> Download all PDFs
+                    </button>
                     <button onClick={e => { e.stopPropagation(); triggerFloorPlanUpload(project) }}
                       disabled={uploadingPlanFor === project.id}
                       style={{ ...ghostBtn, fontSize: 11, padding: '4px 8px' }}>

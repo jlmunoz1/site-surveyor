@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { getEnterprise, getProjects, getSurveys } from '../lib/supabase'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { getEnterprise, getProject, getProjects, getSurveys } from '../lib/supabase'
 import SurveyCanvas from '../components/SurveyCanvas'
 import { buildSurveyPdfBlob, downloadBlob, safeFileName, ensureJSZipLoaded } from '../lib/exportPdf'
 
@@ -17,8 +17,15 @@ const SETTLE_DELAY_MS = 350
 export default function BulkExport() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  // Same page, two scopes: /enterprise/:id/export (every survey across
+  // every project under that enterprise) or /project/:id/export (just
+  // that one project's surveys) — distinguished by the route prefix
+  // rather than two separate components, since everything past "which
+  // surveys count" is identical.
+  const scope = location.pathname.startsWith('/project/') ? 'project' : 'enterprise'
 
-  const [enterprise, setEnterprise] = useState(null)
+  const [scopeName, setScopeName] = useState(null) // enterprise or project name, whichever scope this is
   const [items, setItems] = useState([]) // [{ survey, projectName }]
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -30,17 +37,32 @@ export default function BulkExport() {
   const canvasRef = useRef(null)
   const readyResolveRef = useRef(null)
 
-  useEffect(() => { loadAll() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadAll() }, [id, scope]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadAll() {
     setLoading(true)
+    if (scope === 'project') {
+      const [{ data: project, error: projError }, { data: allSurveys }] = await Promise.all([
+        getProject(id),
+        getSurveys(),
+      ])
+      if (projError || !project) { setError('Project not found.'); setLoading(false); return }
+      setScopeName(project.name)
+      const relevant = (allSurveys || [])
+        .filter(s => s.project_id === id)
+        .map(s => ({ survey: s, projectName: project.name }))
+      setItems(relevant)
+      setLoading(false)
+      return
+    }
+
     const [{ data: ent, error: entError }, { data: allProjects }, { data: allSurveys }] = await Promise.all([
       getEnterprise(id),
       getProjects(),
       getSurveys(),
     ])
     if (entError || !ent) { setError('Enterprise not found.'); setLoading(false); return }
-    setEnterprise(ent)
+    setScopeName(ent.name)
     const projectIds = new Set((allProjects || []).filter(p => p.enterprise_id === id).map(p => p.id))
     const projectNameById = {}
     ;(allProjects || []).forEach(p => { projectNameById[p.id] = p.name })
@@ -96,7 +118,7 @@ export default function BulkExport() {
 
     if (successCount > 0) {
       const zipBlob = await zip.generateAsync({ type: 'blob' })
-      downloadBlob(zipBlob, `${safeFileName(enterprise?.name || 'export')}-PDFs.zip`)
+      downloadBlob(zipBlob, `${safeFileName(scopeName || 'export')}-PDFs.zip`)
     }
     setExporting(false)
   }
@@ -128,10 +150,10 @@ export default function BulkExport() {
       <button onClick={() => navigate('/')} style={ghostBtn}><i className="ti ti-arrow-left" /> Back to dashboard</button>
 
       <h1 style={{ fontSize: 20, fontWeight: 500, color: '#1a1a18', margin: '16px 0 4px' }}>
-        Export all PDFs — {enterprise?.name}
+        Export all PDFs — {scopeName}
       </h1>
       <p style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>
-        {items.length} survey{items.length !== 1 ? 's' : ''} across every project under this enterprise. Each one is rendered exactly like the "Export PDF" button in the editor, then bundled into a single zip.
+        {items.length} survey{items.length !== 1 ? 's' : ''} {scope === 'project' ? 'in this project' : 'across every project under this enterprise'}. Each one is rendered exactly like the "Export PDF" button in the editor, then bundled into a single zip.
       </p>
 
       {!exporting && results.length === 0 && (
@@ -141,7 +163,7 @@ export default function BulkExport() {
       )}
 
       {items.length === 0 && (
-        <p style={{ fontSize: 13, color: '#aaa' }}>No surveys found under this enterprise's projects yet.</p>
+        <p style={{ fontSize: 13, color: '#aaa' }}>No surveys found {scope === 'project' ? 'in this project' : "under this enterprise's projects"} yet.</p>
       )}
 
       {(exporting || results.length > 0) && (
