@@ -3,7 +3,7 @@ export const DEVICE_DEFS = [
     section: 'Cameras',
     items: [
       { dtype: 'reolink-fe', label: 'Reolink Fisheye', color: '#185FA5', coverage: 110, heatmap: false },
-      { dtype: 'cam-dome',   label: 'Dome Camera',     color: '#378ADD', coverage: 70,  heatmap: false },
+      { dtype: 'cam-dome',   label: 'Dome Light',     color: '#378ADD', coverage: 70,  heatmap: false },
       { dtype: 'cam-bullet', label: 'Bullet Camera',   color: '#0C447C', coverage: 55,  heatmap: false },
     ]
   },
