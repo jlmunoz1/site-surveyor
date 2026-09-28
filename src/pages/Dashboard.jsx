@@ -13,6 +13,7 @@ import {
 } from '../lib/supabase'
 import { geocodeAddress } from '../lib/geocode'
 import { DEVICE_DEFS } from '../lib/devices'
+import { downloadBlob, safeFileName } from '../lib/exportPdf'
 
 export default function Dashboard() {
   const { user, isAdmin } = useAuth()
@@ -870,6 +871,31 @@ export default function Dashboard() {
 }
 
 function SurveyRow({ survey, onOpen, onDelete, ownerLabel }) {
+  const [downloadingPlan, setDownloadingPlan] = useState(false)
+
+  // Downloads the original uploaded floor plan file (image or PDF) as
+  // it is — not an export of the annotated survey. A plain <a
+  // download> doesn't reliably work here since floor_plan_url points
+  // at Supabase Storage (a different origin); most browsers silently
+  // ignore the download attribute cross-origin and just navigate to
+  // the file instead. Fetching it as a blob first and triggering the
+  // download ourselves works regardless of origin.
+  async function handleDownloadFloorPlan(e) {
+    e.stopPropagation()
+    if (!survey.floor_plan_url) return
+    setDownloadingPlan(true)
+    try {
+      const res = await fetch(survey.floor_plan_url)
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      const blob = await res.blob()
+      const isPdf = survey.floor_plan_url.toLowerCase().includes('.pdf') || blob.type === 'application/pdf'
+      downloadBlob(blob, `${safeFileName(survey.name)}${isPdf ? '.pdf' : ''}`)
+    } catch (err) {
+      alert('Could not download the floor plan: ' + err.message)
+    }
+    setDownloadingPlan(false)
+  }
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', padding: '11px 16px 11px 40px', borderBottom: '0.5px solid #f0efea' }}>
       <i className="ti ti-map" style={{ fontSize: 14, color: '#888', marginRight: 10 }} />
@@ -884,7 +910,13 @@ function SurveyRow({ survey, onOpen, onDelete, ownerLabel }) {
         </p>
         <p style={{ margin: '2px 0 0', fontSize: 11, color: '#aaa' }}>
           Updated {new Date(survey.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-          {survey.floor_plan_url && <span style={{ marginLeft: 8, color: '#1D9E75' }}>✓ Floor plan</span>}
+          {survey.floor_plan_url && (
+            <button onClick={handleDownloadFloorPlan} disabled={downloadingPlan}
+              title="Download the original floor plan file"
+              style={{ marginLeft: 8, color: '#1D9E75', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <i className="ti ti-download" style={{ fontSize: 11 }} /> {downloadingPlan ? 'Downloading…' : 'Floor plan'}
+            </button>
+          )}
         </p>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
