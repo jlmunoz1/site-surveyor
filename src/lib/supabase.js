@@ -187,6 +187,24 @@ export async function mergeEnterprises(fromId, toId) {
 
 // Assigns (or unassigns, if enterpriseId is null) a project to an
 // enterprise. Same zero-row check pattern as the other project writes.
+// Moves surveys into a project. Returns which ones actually moved: a
+// database rule that blocks a write doesn't raise an error, it just
+// updates zero rows, so the caller compares this list against what it
+// asked for rather than trusting "no error" to mean "all moved".
+// (updated_at is deliberately left alone - moving a survey isn't an edit
+// to its contents, and bumping it could trigger a false "someone else
+// changed this" warning for anyone with that survey open.)
+export async function moveSurveysToProject(surveyIds, projectId) {
+  if (!surveyIds || surveyIds.length === 0) return { moved: [], error: null }
+  const { data, error } = await supabase
+    .from('surveys')
+    .update({ project_id: projectId })
+    .in('id', surveyIds)
+    .select('id')
+  if (error) return { moved: [], error }
+  return { moved: (data || []).map(r => r.id), error: null }
+}
+
 export async function setProjectEnterprise(projectId, enterpriseId) {
   const { data, error } = await supabase
     .from('projects')

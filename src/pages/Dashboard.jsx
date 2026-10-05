@@ -9,7 +9,7 @@ import {
   syncProjectToPortMapper, setProjectPortMapperSiteId,
   uploadFloorPlan, saveSurvey,
   getProjectMembers, inviteToProject, removeProjectMember, sendProjectInviteEmail,
-  getEnterprises, createEnterprise, renameEnterprise, deleteEnterprise, setProjectEnterprise,
+  getEnterprises, createEnterprise, renameEnterprise, deleteEnterprise, setProjectEnterprise, moveSurveysToProject,
 } from '../lib/supabase'
 import { geocodeAddress } from '../lib/geocode'
 import { DEVICE_DEFS } from '../lib/devices'
@@ -23,6 +23,18 @@ export default function Dashboard() {
   const [enterprises, setEnterprises] = useState([])
   const [expandedEnterprises, setExpandedEnterprises] = useState({}) // default-collapsed; only tracks explicit expansions
   const [showNewEnterprise, setShowNewEnterprise] = useState(false)
+
+  // Moving loose (not-in-any-project) surveys into an enterprise. A survey
+  // can't belong to an enterprise directly - it lives in a project, and the
+  // project belongs to the enterprise - so the move is: pick the
+  // enterprise, then pick (or create) the project inside it.
+  const [selectedLoose, setSelectedLoose] = useState({}) // surveyId -> true
+  const [showMoveModal, setShowMoveModal] = useState(false)
+  const [moveEnterpriseId, setMoveEnterpriseId] = useState('')
+  const [moveProjectChoice, setMoveProjectChoice] = useState('') // an existing project id, or '__new__'
+  const [moveNewProjectName, setMoveNewProjectName] = useState('')
+  const [moving, setMoving] = useState(false)
+  const [moveResult, setMoveResult] = useState(null) // { ok, message }
   const [newEnterpriseName, setNewEnterpriseName] = useState('')
   const [creatingEnterprise, setCreatingEnterprise] = useState(false)
   const [editingEnterpriseId, setEditingEnterpriseId] = useState(null)
@@ -101,6 +113,89 @@ export default function Dashboard() {
     if (userId === user.id) return null
     const p = profiles[userId]
     return p?.full_name || p?.email || 'Teammate'
+  }
+
+  // Same two steps the New project form does - create it, then mirror it
+  // into Port Mapper and remember the site id - so a project made while
+  // moving surveys isn't left unlinked (which is what stops later racks
+  // from being created against it). Port Mapper trouble is a soft warning,
+  // never a reason to refuse creating the project.
+  async function createProjectWithSync(name) {
+    const { data, error } = await createProject(user.id, name)
+    if (error) return { project: null, error: error.message, warning: null }
+    let project = data
+    let warning = null
+    const { site, error: syncError } = await syncProjectToPortMapper(data.name)
+    if (syncError) {
+      warning = `The project was created, but couldn't sync to Port Mapper: ${syncError}`
+    } else if (site?.id) {
+      await setProjectPortMapperSiteId(data.id, site.id)
+      project = { ...data, port_mapper_site_id: site.id }
+    }
+    return { project, error: null, warning }
+  }
+
+  function toggleLoose(id) { setSelectedLoose(m => ({ ...m, [id]: !m[id] })) }
+  function toggleAllLoose(list) {
+    const allOn = list.length > 0 && list.every(s => selectedLoose[s.id])
+    setSelectedLoose(m => { const n = { ...m }; list.forEach(s => { n[s.id] = !allOn }); return n })
+  }
+
+  function openMoveModal() {
+    setMoveEnterpriseId(''); setMoveProjectChoice(''); setMoveNewProjectName(''); setMoveResult(null)
+    setShowMoveModal(true)
+  }
+
+  async function handleMoveSurveys() {
+    const ids = selectedLooseList.map(s => s.id)
+    if (ids.length === 0 || !moveEnterpriseId || !moveProjectChoice) return
+    const enterpriseName = enterprises.find(x => x.id === moveEnterpriseId)?.name || 'the enterprise'
+    setMoving(true); setMoveResult(null)
+
+    let target = null
+    let warning = null
+    if (moveProjectChoice === '__new__') {
+      const name = moveNewProjectName.trim()
+      if (!name) { setMoving(false); return }
+      const created = await createProjectWithSync(name)
+      if (created.error) {
+        setMoveResult({ ok: false, message: `Couldn't create the project: ${created.error}` })
+        setMoving(false); return
+      }
+      warning = created.warning
+      const { error: entError } = await setProjectEnterprise(created.project.id, moveEnterpriseId)
+      if (entError) {
+        // The project exists but isn't in the enterprise yet. Show it so it
+        // isn't invisible, but don't move anything into a project that's
+        // not where the person asked for it to be.
+        setProjects(ps => [...ps, created.project])
+        setMoveResult({ ok: false, message: `"${name}" was created, but couldn't be placed in ${enterpriseName}: ${entError.message}. Nothing was moved - set its enterprise from the dropdown on the project, then try again.` })
+        setMoving(false); return
+      }
+      target = { ...created.project, enterprise_id: moveEnterpriseId }
+      setProjects(ps => [...ps, target])
+    } else {
+      target = projects.find(p => p.id === moveProjectChoice)
+      if (!target) { setMoving(false); return }
+    }
+
+    const { moved, error } = await moveSurveysToProject(ids, target.id)
+    setMoving(false)
+    if (error) { setMoveResult({ ok: false, message: error.message }); return }
+
+    const movedSet = new Set(moved)
+    setSurveys(ss => ss.map(sv => movedSet.has(sv.id) ? { ...sv, project_id: target.id } : sv))
+    setExpanded(ex => ({ ...ex, [target.id]: true }))
+    setExpandedEnterprises(ex => ({ ...ex, [moveEnterpriseId]: true }))
+    setSelectedLoose(m => { const n = { ...m }; moved.forEach(id => { delete n[id] }); return n })
+
+    const failed = ids.length - moved.length
+    setMoveResult({
+      ok: failed === 0,
+      message: `Moved ${moved.length} survey${moved.length !== 1 ? 's' : ''} into "${target.name}" under ${enterpriseName}.`
+        + (failed ? ` ${failed} couldn't be moved - you may not have permission to edit ${failed === 1 ? 'it' : 'them'}.` : '')
+        + (warning ? ` ${warning}` : ''),
+    })
   }
 
   async function handleCreateProject(e) {
@@ -408,6 +503,9 @@ export default function Dashboard() {
     ? surveys.filter(s => s.user_id === user.id)
     : surveys.filter(s => s.user_id !== user.id)
   ).filter(s => !s.project_id)
+  // Only count selections that are still on screen (a survey ticked on one
+  // tab shouldn't be moved by a click made on the other).
+  const selectedLooseList = visibleUnassigned.filter(s => selectedLoose[s.id])
 
   const myCount = projects.filter(p => p.user_id === user.id).length + surveys.filter(s => s.user_id === user.id && !s.project_id).length
   const teamCount = projects.filter(p => p.user_id !== user.id).length + surveys.filter(s => s.user_id !== user.id && !s.project_id).length
@@ -799,17 +897,111 @@ export default function Dashboard() {
             {/* Unassigned surveys */}
             {visibleUnassigned.length > 0 && (
               <div style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <input type="checkbox" title="Select all" style={{ cursor: 'pointer' }}
+                    checked={visibleUnassigned.length > 0 && visibleUnassigned.every(s => selectedLoose[s.id])}
+                    onChange={() => toggleAllLoose(visibleUnassigned)} />
                   <i className="ti ti-layout-list" style={{ fontSize: 14, color: '#888' }} />
                   <span style={{ fontSize: 13, fontWeight: 500, color: '#888' }}>Unassigned surveys</span>
+                  <span style={{ fontSize: 11, color: '#aaa' }}>{visibleUnassigned.length} not in any project</span>
+                  <span style={{ flex: 1 }} />
+                  <button onClick={openMoveModal} disabled={selectedLooseList.length === 0}
+                    title={selectedLooseList.length === 0 ? 'Tick the surveys you want to move first' : 'Put the ticked surveys into a project under an enterprise'}
+                    style={{ ...ghostBtn, fontSize: 11, padding: '4px 10px', opacity: selectedLooseList.length === 0 ? 0.5 : 1, cursor: selectedLooseList.length === 0 ? 'default' : 'pointer' }}>
+                    <i className="ti ti-folder-share" style={{ marginRight: 4 }} />
+                    Move{selectedLooseList.length > 0 ? ` ${selectedLooseList.length}` : ''} to an enterprise…
+                  </button>
                 </div>
                 {visibleUnassigned.map(s => (
                   <SurveyRow key={s.id} survey={s} ownerLabel={ownerLabel(s.user_id)}
+                    selected={!!selectedLoose[s.id]} onToggleSelect={() => toggleLoose(s.id)}
                     onOpen={() => navigate(`/survey/${s.id}`)}
                     onDelete={s.user_id === user.id ? () => handleDeleteSurvey(s.id, s.name) : null} />
                 ))}
               </div>
             )}
+
+            {showMoveModal && (() => {
+              const projectsInEnt = projects.filter(p => p.enterprise_id === moveEnterpriseId)
+              const canSubmit = !moving && selectedLooseList.length > 0 && moveEnterpriseId && moveProjectChoice
+                && (moveProjectChoice !== '__new__' || moveNewProjectName.trim())
+              const label = { display: 'block', fontSize: 12, fontWeight: 500, color: '#444', marginBottom: 5 }
+              return (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 16 }}
+                  onMouseDown={e => { if (e.target === e.currentTarget && !moving) setShowMoveModal(false) }}>
+                  <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: 460, maxWidth: '100%', maxHeight: '92vh', overflow: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }}>
+                    <h3 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 500, color: '#1a1a18' }}>
+                      Move {selectedLooseList.length} survey{selectedLooseList.length !== 1 ? 's' : ''} into an enterprise
+                    </h3>
+                    <p style={{ fontSize: 12, color: '#888', lineHeight: 1.5, margin: '0 0 14px' }}>
+                      Surveys live inside projects, and projects belong to an enterprise - so choose the enterprise, then the project they should go in.
+                    </p>
+
+                    <div style={{ fontSize: 12, color: '#555', background: '#f8f8f6', border: '0.5px solid #e0dfd8', borderRadius: 7, padding: '8px 10px', marginBottom: 16 }}>
+                      {selectedLooseList.slice(0, 6).map(s => <div key={s.id}>• {s.name}</div>)}
+                      {selectedLooseList.length > 6 && <div style={{ color: '#aaa' }}>+ {selectedLooseList.length - 6} more</div>}
+                      {selectedLooseList.length === 0 && <div style={{ color: '#aaa' }}>None left to move.</div>}
+                    </div>
+
+                    {moveResult && (
+                      <div style={{ fontSize: 12, padding: '8px 12px', borderRadius: 6, marginBottom: 14, lineHeight: 1.5, background: moveResult.ok ? '#E1F5EE' : '#FCEBEB', color: moveResult.ok ? '#0F6E56' : '#A32D2D' }}>
+                        {moveResult.message}
+                      </div>
+                    )}
+
+                    {enterprises.length === 0 ? (
+                      <p style={{ fontSize: 12, color: '#BA7517', background: '#FFF7E6', padding: '8px 12px', borderRadius: 6 }}>
+                        You don't have any enterprises yet. Close this, use "New enterprise" at the top, then come back.
+                      </p>
+                    ) : (
+                      <>
+                        <label style={label}>Enterprise</label>
+                        <select value={moveEnterpriseId} style={{ ...fieldInput, marginBottom: 14 }}
+                          onChange={e => {
+                            const id = e.target.value
+                            setMoveEnterpriseId(id)
+                            setMoveNewProjectName('')
+                            // No projects there yet? The only option is a new one.
+                            setMoveProjectChoice(id && !projects.some(p => p.enterprise_id === id) ? '__new__' : '')
+                          }}>
+                          <option value="">Choose an enterprise…</option>
+                          {enterprises.map(en => <option key={en.id} value={en.id}>{en.name}</option>)}
+                        </select>
+
+                        {moveEnterpriseId && (
+                          <>
+                            <label style={label}>Project</label>
+                            <select value={moveProjectChoice} style={{ ...fieldInput, marginBottom: 14 }}
+                              onChange={e => setMoveProjectChoice(e.target.value)}>
+                              {projectsInEnt.length > 0 && <option value="">Choose a project…</option>}
+                              {projectsInEnt.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}{p.user_id !== user.id ? ` (${ownerLabel(p.user_id)})` : ''}</option>
+                              ))}
+                              <option value="__new__">+ New project in this enterprise…</option>
+                            </select>
+                            {moveProjectChoice === '__new__' && (
+                              <input autoFocus value={moveNewProjectName} placeholder="New project name, e.g. The Blake at the Grove"
+                                onChange={e => setMoveNewProjectName(e.target.value)} style={{ ...fieldInput, marginBottom: 14 }} />
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+                      <button onClick={() => setShowMoveModal(false)} disabled={moving} style={ghostBtn}>
+                        {moveResult?.ok ? 'Done' : 'Cancel'}
+                      </button>
+                      {!moveResult?.ok && (
+                        <button onClick={handleMoveSurveys} disabled={!canSubmit} style={{ ...primaryBtn, opacity: canSubmit ? 1 : 0.5 }}>
+                          {moving ? 'Moving…' : `Move ${selectedLooseList.length} survey${selectedLooseList.length !== 1 ? 's' : ''}`}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
 
             {visibleProjects.length === 0 && visibleUnassigned.length === 0 && (
               <div style={{ textAlign: 'center', padding: 64, color: '#888' }}>
@@ -874,7 +1066,7 @@ export default function Dashboard() {
   )
 }
 
-function SurveyRow({ survey, onOpen, onDelete, ownerLabel }) {
+function SurveyRow({ survey, onOpen, onDelete, ownerLabel, selected, onToggleSelect }) {
   const [downloadingPlan, setDownloadingPlan] = useState(false)
 
   // Downloads the original uploaded floor plan file (image or PDF) as
@@ -901,7 +1093,11 @@ function SurveyRow({ survey, onOpen, onDelete, ownerLabel }) {
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', padding: '11px 16px 11px 40px', borderBottom: '0.5px solid #f0efea' }}>
+    <div style={{ display: 'flex', alignItems: 'center', padding: '11px 16px 11px 40px', borderBottom: '0.5px solid #f0efea', background: selected ? '#F3F8FE' : undefined }}>
+      {onToggleSelect && (
+        <input type="checkbox" checked={!!selected} onChange={onToggleSelect} title="Select to move"
+          style={{ marginRight: 10, marginLeft: -24, cursor: 'pointer' }} />
+      )}
       <i className="ti ti-map" style={{ fontSize: 14, color: '#888', marginRight: 10 }} />
       <div style={{ flex: 1 }}>
         <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: '#1a1a18' }}>
