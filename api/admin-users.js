@@ -48,12 +48,19 @@ module.exports = async function handler(req, res) {
 
     // 2) Are they an admin?
     const { data: callerProfile, error: callerErr } = await admin
-      .from('profiles').select('is_admin').eq('id', caller.id).maybeSingle()
+      .from('profiles').select('is_admin, access_expires_at').eq('id', caller.id).maybeSingle()
     if (callerErr) return res.status(500).json({ error: callerErr.message })
     if (!callerProfile?.is_admin) return res.status(403).json({ error: 'Only admins can manage users' })
+    // An admin whose own access has ended (revoked or expired) is no longer
+    // an admin for this purpose - this endpoint uses a key that bypasses
+    // every database rule, so it has to enforce that itself.
+    if (callerProfile.access_expires_at && new Date(callerProfile.access_expires_at) <= new Date()) {
+      return res.status(403).json({ error: 'Your access has ended, so you can no longer manage users' })
+    }
 
     if (action === 'invite') return await inviteUser(admin, req, res, body)
     if (action === 'update') return await updateUser(admin, res, body, caller)
+    if (action === 'access') return await setAccess(admin, res, body, caller)
     return res.status(400).json({ error: 'Unknown action' })
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Unknown error managing users' })
@@ -199,4 +206,31 @@ async function updateUser(admin, res, body, caller) {
     })
   }
   return res.status(200).json({ ok: true, profile: updated, warning })
+}
+
+// ── Revoke / restore ─────────────────────────────────────────────────────
+// Revoking sets the account's access end date to "a moment ago". That is the
+// same switch the access-limit feature already uses, so it is enforced the
+// same way: the database refuses every survey / project / enterprise read and
+// write for that account immediately (has_valid_access), and the app sends
+// them to the "Access has expired" page. Nothing is deleted, and Restore
+// simply clears the date. The timestamp comes from THIS server's clock, so a
+// wrong clock on the admin's computer can't leave a revoke pending.
+async function setAccess(admin, res, body, caller) {
+  const userId = body.userId
+  const mode = body.mode
+  if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'A user is required' })
+  if (mode !== 'revoke' && mode !== 'restore') return res.status(400).json({ error: 'Unknown access change' })
+  if (userId === caller.id) return res.status(400).json({ error: "You can't change your own access" })
+
+  const { data: target, error: targetErr } = await admin
+    .from('profiles').select('id').eq('id', userId).maybeSingle()
+  if (targetErr) return res.status(500).json({ error: targetErr.message })
+  if (!target) return res.status(404).json({ error: 'That user was not found' })
+
+  const accessExpiresAt = mode === 'revoke' ? new Date(Date.now() - 5000).toISOString() : null
+  const { data: updated, error: updErr } = await admin
+    .from('profiles').update({ access_expires_at: accessExpiresAt }).eq('id', userId).select().maybeSingle()
+  if (updErr) return res.status(500).json({ error: updErr.message })
+  return res.status(200).json({ ok: true, profile: updated })
 }

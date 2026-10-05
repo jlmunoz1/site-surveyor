@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { getProfiles, getSurveys, getProjects, getEnterprises, renameEnterprise, deleteEnterprise, mergeEnterprises, setUserAdmin, setUserContractor, setUserAccessExpiration, sendPasswordReset, adminInviteUser, adminUpdateUser, signOut } from '../lib/supabase'
+import { getProfiles, getSurveys, getProjects, getEnterprises, renameEnterprise, deleteEnterprise, mergeEnterprises, setUserAdmin, setUserContractor, setUserAccessExpiration, sendPasswordReset, adminInviteUser, adminUpdateUser, adminSetAccess, signOut } from '../lib/supabase'
 
 export default function AdminPage() {
   const { user } = useAuth()
@@ -107,6 +107,26 @@ export default function AdminPage() {
     const { error } = await setUserAccessExpiration(u.id, expiresAt)
     if (error) setError(error.message)
     else setUsers(list => list.map(x => x.id === u.id ? { ...x, access_expires_at: expiresAt } : x))
+    setBusyId(null)
+  }
+
+  async function handleRevoke(u) {
+    if (u.id === user.id) return
+    const who = u.full_name ? `${u.full_name} (${u.email})` : u.email
+    if (!window.confirm(`Revoke access for ${who}?\n\nThey'll be locked out right away. Their surveys and projects are kept, and you can restore access at any time.`)) return
+    setBusyId(u.id)
+    const res = await adminSetAccess(u.id, 'revoke')
+    if (res.error) setError(res.error)
+    else setUsers(list => list.map(x => x.id === u.id ? { ...x, access_expires_at: res.profile?.access_expires_at ?? new Date().toISOString() } : x))
+    setBusyId(null)
+  }
+
+  async function handleRestore(u) {
+    if (u.id === user.id) return
+    setBusyId(u.id)
+    const res = await adminSetAccess(u.id, 'restore')
+    if (res.error) setError(res.error)
+    else setUsers(list => list.map(x => x.id === u.id ? { ...x, access_expires_at: null } : x))
     setBusyId(null)
   }
 
@@ -278,7 +298,7 @@ export default function AdminPage() {
           <div style={{ textAlign: 'center', padding: 48, color: '#888', fontSize: 13 }}>Loading…</div>
         ) : (
           <div style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px 56px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 176px 130px 56px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
               <span>Name</span>
               <span>Email</span>
               <span>Joined</span>
@@ -298,7 +318,7 @@ export default function AdminPage() {
               const exp = u.access_expires_at ? new Date(u.access_expires_at) : null
               const isExpired = exp && exp <= new Date()
               return (
-                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px 56px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 176px 130px 56px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
                   <span style={{ color: '#1a1a18', fontWeight: 500 }}>
                     {u.full_name || '—'}{u.id === user.id && <span style={{ color: '#888', fontWeight: 400 }}> (you)</span>}
                   </span>
@@ -351,6 +371,19 @@ export default function AdminPage() {
                           ✕
                         </button>
                       )}
+                      {u.id !== user.id && (isExpired ? (
+                        <button onClick={() => handleRestore(u)} disabled={busyId === u.id}
+                          title="Give this account its access back, with no end date"
+                          style={{ ...tinyBtn, color: '#0F6E56', borderColor: '#9AD4BE', background: '#E1F5EE' }}>
+                          Restore
+                        </button>
+                      ) : (
+                        <button onClick={() => handleRevoke(u)} disabled={busyId === u.id}
+                          title="Lock this account out right now. Their surveys and projects are kept, and you can restore access at any time."
+                          style={{ ...tinyBtn, color: '#A32D2D', borderColor: '#F09595', background: '#FCEBEB' }}>
+                          Revoke
+                        </button>
+                      ))}
                     </div>
                   </div>
                   <button

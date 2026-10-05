@@ -421,6 +421,10 @@ export function adminInviteUser(fields) { return callAdminUsers({ action: 'invit
 // { userId, fullName?, email?, isAdmin?, isContractor?, accessExpiresAt? } - omitted fields are left alone
 export function adminUpdateUser(fields) { return callAdminUsers({ action: 'update', ...fields }) }
 
+// Lock an account out right now ('revoke') or give access back ('restore').
+// Nothing is deleted either way.
+export function adminSetAccess(userId, mode) { return callAdminUsers({ action: 'access', userId, mode }) }
+
 // ── Floor plan storage ──────────────────────────────────────────────────
 export async function uploadFloorPlan(surveyId, file) {
   const ext = file.name.split('.').pop()
