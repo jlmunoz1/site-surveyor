@@ -393,6 +393,34 @@ export async function setUserAccessExpiration(id, expiresAt) {
   return supabase.from('profiles').update({ access_expires_at: expiresAt }).eq('id', id)
 }
 
+// ── Admin: invite & edit users ──────────────────────────────────────────
+// These go through api/admin-users.js (not straight to the database) since
+// creating an account and changing a sign-in email need elevated
+// privileges. The server re-checks that the caller is an admin from the
+// access token sent here - this client code is convenience, not security.
+async function callAdminUsers(payload) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return { error: 'Your session expired - please sign in again.' }
+    const res = await fetch('/api/admin-users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: session.access_token, ...payload }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) return { error: data.error || `Request failed (${res.status})` }
+    return { ...data, error: null }
+  } catch (err) {
+    return { error: err.message || 'Could not reach the admin service' }
+  }
+}
+
+// { email, fullName, isAdmin, isContractor, accessExpiresAt (ISO or null) }
+export function adminInviteUser(fields) { return callAdminUsers({ action: 'invite', ...fields }) }
+
+// { userId, fullName?, email?, isAdmin?, isContractor?, accessExpiresAt? } - omitted fields are left alone
+export function adminUpdateUser(fields) { return callAdminUsers({ action: 'update', ...fields }) }
+
 // ── Floor plan storage ──────────────────────────────────────────────────
 export async function uploadFloorPlan(surveyId, file) {
   const ext = file.name.split('.').pop()

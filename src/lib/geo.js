@@ -164,12 +164,14 @@ export function fitGeoTransform(points) {
 // Convenience: run the fitted transform over the floor plan's three
 // reference corners (top-left, top-right, bottom-left), which is all a
 // rotated image overlay needs to know how to place itself.
-export function computeCorners(transform, imageWidth, imageHeight) {
+// originX/originY let this describe a sub-rectangle of the plan (e.g. a
+// cropped window) instead of the whole sheet.
+export function computeCorners(transform, imageWidth, imageHeight, originX = 0, originY = 0) {
   if (!transform) return null
   return {
-    topLeft: transform.apply(0, 0),
-    topRight: transform.apply(imageWidth, 0),
-    bottomLeft: transform.apply(0, imageHeight),
+    topLeft: transform.apply(originX, originY),
+    topRight: transform.apply(originX + imageWidth, originY),
+    bottomLeft: transform.apply(originX, originY + imageHeight),
   }
 }
 

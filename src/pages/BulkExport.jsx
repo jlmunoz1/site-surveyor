@@ -222,6 +222,7 @@ export default function BulkExport() {
             floorPlanUrl={renderSurvey.floor_plan_url || ''}
             floorPlanPage={renderSurvey.floor_plan_page || 1}
             floorPlanRotation={renderSurvey.floor_plan_rotation || 0}
+            floorPlanCrop={renderSurvey.floor_plan_crop || null}
             iconSizes={renderSurvey.icon_sizes && typeof renderSurvey.icon_sizes === 'object' ? renderSurvey.icon_sizes : undefined}
             labelSizes={renderSurvey.label_sizes && typeof renderSurvey.label_sizes === 'object' ? renderSurvey.label_sizes : undefined}
             hiddenLabelTypes={Array.isArray(renderSurvey.hidden_label_types) ? renderSurvey.hidden_label_types : []}

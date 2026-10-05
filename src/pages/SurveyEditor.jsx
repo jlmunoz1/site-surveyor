@@ -74,6 +74,9 @@ export default function SurveyEditor() {
   const [floorPlanUrl, setFloorPlanUrl] = useState('')
   const [floorPlanPage, setFloorPlanPage] = useState(1)
   const [floorPlanRotation, setFloorPlanRotation] = useState(0)
+  const [floorPlanCrop, setFloorPlanCrop] = useState(null) // saved crop window {x,y,w,h} in plan pixel space, or null
+  const [cropping, setCropping] = useState(false)           // crop-edit mode (drag a box)
+  const [pendingCrop, setPendingCrop] = useState(null)      // the box being drawn, not yet applied
 
   // AI device detection — scans an imported PDF floor plan for markers
   // that are already drawn on it (e.g. a System Surveyor export) and
@@ -135,6 +138,8 @@ export default function SurveyEditor() {
   const [calibratePixels, setCalibratePixels] = useState(0)
 
   const [mode, setMode] = useState('select')
+  // Picking any drawing tool while a crop box is being drawn cancels the crop.
+  useEffect(() => { if (cropping) { setCropping(false); setPendingCrop(null) } }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
   const [activeCableType, setActiveCableType] = useState('cat6')
   const [showHeatmap, setShowHeatmap] = useState(false)
   const [heatmapOpacity, setHeatmapOpacity] = useState(0.8)
@@ -181,6 +186,7 @@ export default function SurveyEditor() {
     setFloorPlanUrl(data.floor_plan_url || '')
     setFloorPlanPage(data.floor_plan_page || 1)
     setFloorPlanRotation(data.floor_plan_rotation || 0)
+    setFloorPlanCrop(data.floor_plan_crop || null)
     // If this survey belongs to a project that's synced to Port Mapper,
     // remember its site id so newly placed MDF/IDF/switches can get a
     // matching rack created automatically.
@@ -723,7 +729,7 @@ export default function SurveyEditor() {
       `This PDF has ${pageCount} pages. Create ${pageCount - 1} additional survey(s) in this project — one per remaining page — so each floor is its own survey?`
     )) {
       setFloorPlanUrl(url); setFloorPlanPage(1)
-      await saveSurvey(id, { floor_plan_url: url, floor_plan_page: 1 })
+      await saveOneOff({ floor_plan_url: url, floor_plan_page: 1, ...(floorPlanCrop ? { floor_plan_crop: null } : {}) }); setFloorPlanCrop(null)
       let created = 0
       for (let p = 2; p <= pageCount; p++) {
         const { data: newSurvey, error: createErr } = await createSurvey(survey.user_id, `Floor ${p}`, survey.project_id || null)
@@ -741,7 +747,7 @@ export default function SurveyEditor() {
     }
 
     setFloorPlanUrl(url); setFloorPlanPage(1)
-    await saveSurvey(id, { floor_plan_url: url, floor_plan_page: 1 })
+    await saveOneOff({ floor_plan_url: url, floor_plan_page: 1, ...(floorPlanCrop ? { floor_plan_crop: null } : {}) }); setFloorPlanCrop(null)
     setSaving(false); setSaveMsg('Floor plan uploaded'); setTimeout(() => setSaveMsg(''), 2500)
     e.target.value = ''
 
@@ -755,10 +761,46 @@ export default function SurveyEditor() {
     }
   }
 
+  // Saves a one-off setting (crop, rotation, plan removal) straight away,
+  // outside the debounced autosave - and refreshes the conflict token from
+  // the row that comes back. Without that, the next autosave would still be
+  // holding the pre-save timestamp and wrongly report that "someone else"
+  // changed the survey (it was just us).
+  async function saveOneOff(updates) {
+    const { data, error } = await saveSurvey(id, updates, { updatedBy: user?.id })
+    if (!error && data?.[0]?.updated_at) lastKnownUpdatedAt.current = data[0].updated_at
+    return { data, error }
+  }
+
+  function startCrop() {
+    setCalibrating(false); setMeasuring(false) // one drag tool at a time
+    setPendingCrop(floorPlanCrop)
+    setCropping(true)
+  }
+  function cancelCrop() { setCropping(false); setPendingCrop(null) }
+  async function applyCrop() {
+    if (!pendingCrop) return
+    setSaving(true)
+    const { error } = await saveOneOff({ floor_plan_crop: pendingCrop })
+    setSaving(false)
+    if (error) { alert('Could not save the crop: ' + error.message); return }
+    setFloorPlanCrop(pendingCrop); setCropping(false); setPendingCrop(null)
+    setSaveMsg('Crop applied'); setTimeout(() => setSaveMsg(''), 2000)
+  }
+  async function resetCrop() {
+    setSaving(true)
+    const { error } = await saveOneOff({ floor_plan_crop: null })
+    setSaving(false)
+    if (error) { alert('Could not reset the crop: ' + error.message); return }
+    setFloorPlanCrop(null); setCropping(false); setPendingCrop(null)
+    setSaveMsg('Crop removed'); setTimeout(() => setSaveMsg(''), 2000)
+  }
+
   async function handleDeleteFloorPlan() {
     if (!window.confirm('Remove the floor plan from this survey?')) return
     setSaving(true)
-    await saveSurvey(id, { floor_plan_url: '', floor_plan_rotation: 0, floor_plan_page: 1 })
+    await saveOneOff({ floor_plan_url: '', floor_plan_rotation: 0, floor_plan_page: 1, ...(floorPlanCrop ? { floor_plan_crop: null } : {}) })
+    setFloorPlanCrop(null)
     setFloorPlanUrl('')
     setFloorPlanRotation(0)
     setFloorPlanPage(1)
@@ -768,7 +810,12 @@ export default function SurveyEditor() {
   async function handleRotateFloorPlan() {
     const newRotation = (floorPlanRotation + 90) % 360
     setFloorPlanRotation(newRotation)
-    await saveSurvey(id, { floor_plan_rotation: newRotation })
+    // A crop box is drawn against the plan's current orientation, so it no
+    // longer lines up after a rotation - clear it rather than leave a window
+    // pointing at the wrong part of the sheet. (Only sent when a crop
+    // exists, so rotating still works before the crop column is added.)
+    setFloorPlanCrop(null)
+    await saveOneOff({ floor_plan_rotation: newRotation, ...(floorPlanCrop ? { floor_plan_crop: null } : {}) })
   }
 
   // Toggles whether labels are shown for one specific device type
@@ -793,12 +840,14 @@ export default function SurveyEditor() {
   }
 
   function startCalibrate() {
+    setCropping(false); setPendingCrop(null)
     setMeasuring(false)
     setCalibrating(true)
     setMode('select')
   }
 
   function startMeasure() {
+    setCropping(false); setPendingCrop(null)
     setCalibrating(false)
     setMeasuring(true)
     setMode('select')
@@ -938,6 +987,29 @@ export default function SurveyEditor() {
                 <button style={{ ...tbBtn, color: '#534AB7', borderColor: '#AFA9EC' }} onClick={handleRotateFloorPlan} title="Rotate 90° clockwise">
                   <i className="ti ti-rotate-clockwise" /> Rotate {floorPlanRotation > 0 ? `(${floorPlanRotation}°)` : ''}
                 </button>
+                {!cropping ? (
+                  <button style={{ ...tbBtn, color: '#0F6E56', borderColor: '#9AD9BE' }} onClick={startCrop}
+                    title="Trim the floor plan to just the area you want - non-destructive, you can reset it any time">
+                    <i className="ti ti-crop" /> Crop{floorPlanCrop ? ' ✓' : ''}
+                  </button>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 11, color: '#0F6E56' }}>
+                      {pendingCrop ? `${pendingCrop.w} × ${pendingCrop.h}` : 'Drag a box around the area to keep'}
+                    </span>
+                    <button style={{ ...tbBtn, color: '#fff', background: '#0F6E56', borderColor: '#0F6E56', opacity: pendingCrop ? 1 : 0.5 }}
+                      disabled={!pendingCrop} onClick={applyCrop}>
+                      <i className="ti ti-check" /> Apply crop
+                    </button>
+                    {floorPlanCrop && (
+                      <button style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }} onClick={resetCrop}
+                        title="Remove the crop and show the whole plan again">
+                        <i className="ti ti-arrow-back-up" /> Reset crop
+                      </button>
+                    )}
+                    <button style={tbBtn} onClick={cancelCrop}>Cancel</button>
+                  </>
+                )}
                 <button style={{ ...tbBtn, color: '#A32D2D', borderColor: '#F09595' }} onClick={handleDeleteFloorPlan}>
                   <i className="ti ti-x" /> Remove Plan
                 </button>
@@ -1266,6 +1338,10 @@ export default function SurveyEditor() {
           floorPlanUrl={floorPlanUrl}
           floorPlanPage={floorPlanPage}
           floorPlanRotation={floorPlanRotation}
+          floorPlanCrop={floorPlanCrop}
+          cropping={cropping}
+          cropPreview={pendingCrop}
+          onCropDrag={setPendingCrop}
           iconSizes={iconSizes}
           labelSizes={labelSizes}
           hiddenLabelTypes={hiddenLabelTypes}

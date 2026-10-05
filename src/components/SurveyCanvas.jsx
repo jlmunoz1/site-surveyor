@@ -1,6 +1,20 @@
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { getIconPaths, CABLE_STYLES, DEVICE_STATUSES } from '../lib/devices'
 
+// Clamps a saved crop window to the sheet and returns null when there is
+// effectively no crop (missing, degenerate, or covering the whole plan), so
+// callers can treat "no crop" as a single case.
+function resolveCropRect(crop, fullW, fullH) {
+  if (!crop || !(crop.w > 0) || !(crop.h > 0)) return null
+  const x = Math.max(0, Math.min(crop.x || 0, fullW - 1))
+  const y = Math.max(0, Math.min(crop.y || 0, fullH - 1))
+  const w = Math.min(crop.w, fullW - x)
+  const h = Math.min(crop.h, fullH - y)
+  if (w < 8 || h < 8) return null
+  if (x <= 0 && y <= 0 && w >= fullW && h >= fullH) return null
+  return { x, y, w, h }
+}
+
 const SurveyCanvas = forwardRef(function SurveyCanvas({
   devices, cables, svgMarkup, pxPerFt, showHeatmap,
   mode, activeCableType,
@@ -20,6 +34,14 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   // aligning a stacked gateway or just seeing what's covering this
   // floor from above/below. Never persisted; purely a display aid.
   ghostGateways = [],
+  // Non-destructive crop: a window {x, y, w, h} in the floor plan's own
+  // pixel space (the same space devices and markup live in, so nothing
+  // else has to move). `cropping` is the interactive drag-a-box mode, and
+  // `cropPreview` is the box currently being chosen.
+  floorPlanCrop = null,
+  cropping = false,
+  cropPreview = null,
+  onCropDrag,
   heatmapOpacity = 0.8,
   calibrating = false,
   measuring = false,
@@ -50,6 +72,20 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   const isCalibratingDrag = useRef(false)
   const calibStartRef = useRef({ x: 0, y: 0 })
   const [calibDrag, setCalibDrag] = useState(null) // { x1, y1, x2, y2 } while actively dragging
+  const isCroppingDrag = useRef(false)
+  const cropStartRef = useRef({ x: 0, y: 0 })
+  const [cropDrag, setCropDrag] = useState(null) // { x1, y1, x2, y2 } while dragging out a crop box
+  // Live mirrors of the crop props, read by the memoized draw function so
+  // it never works from a stale closure.
+  const cropRef = useRef(null)
+  const croppingRef = useRef(false)
+  cropRef.current = floorPlanCrop
+  croppingRef.current = cropping
+  // Where the drawn canvas sits in plan coordinates (0,0 when uncropped),
+  // and the full uncropped sheet size - needed for centering, export
+  // bounds, and clamping a new crop drag to the sheet.
+  const fpOffsetRef = useRef({ x: 0, y: 0 })
+  const fpFullDimsRef = useRef({ w: 0, h: 0 })
   const isMeasuringDrag = useRef(false)
   const measureStartRef = useRef({ x: 0, y: 0 })
   const [measureLine, setMeasureLine] = useState(null) // { x1, y1, x2, y2, distFt } — persists after mouseup so it can be read
@@ -74,8 +110,8 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       const ch = parseFloat(canvas.style.height) || 0
       if (!cw || !ch) return null
       return {
-        left: panRef.current.x,
-        top: panRef.current.y,
+        left: panRef.current.x + fpOffsetRef.current.x * zoomRef.current,
+        top: panRef.current.y + fpOffsetRef.current.y * zoomRef.current,
         width: cw * zoomRef.current,
         height: ch * zoomRef.current,
       }
@@ -118,13 +154,23 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       // size (its own natural pixels), and "fit to window" is handled
       // purely as a zoom level instead (see getBaseZoom below).
       const PIXEL_DENSITY = 2
-      canvas.width = Math.round(displayW * PIXEL_DENSITY)
-      canvas.height = Math.round(displayH * PIXEL_DENSITY)
-      canvas.style.width = displayW + 'px'
-      canvas.style.height = displayH + 'px'
+      // Crop: draw only the chosen window, positioned at its own spot in
+      // plan coordinates, so every stored coordinate stays valid as-is.
+      // (While crop-edit mode is on, the whole sheet is shown instead.)
+      const cr = resolveCropRect(croppingRef.current ? null : cropRef.current, displayW, displayH)
+      const drawW = cr ? cr.w : displayW, drawH = cr ? cr.h : displayH
+      const offX = cr ? cr.x : 0, offY = cr ? cr.y : 0
+      fpFullDimsRef.current = { w: displayW, h: displayH }
+      fpOffsetRef.current = { x: offX, y: offY }
+      canvas.width = Math.round(drawW * PIXEL_DENSITY)
+      canvas.height = Math.round(drawH * PIXEL_DENSITY)
+      canvas.style.width = drawW + 'px'
+      canvas.style.height = drawH + 'px'
+      canvas.style.left = offX + 'px'
+      canvas.style.top = offY + 'px'
       const rad = (rotNorm * Math.PI) / 180
       ctx.save()
-      ctx.translate(canvas.width / 2, canvas.height / 2)
+      ctx.translate((displayW / 2 - offX) * PIXEL_DENSITY, (displayH / 2 - offY) * PIXEL_DENSITY)
       ctx.rotate(rad)
       ctx.drawImage(image, -srcW * PIXEL_DENSITY / 2, -srcH * PIXEL_DENSITY / 2, srcW * PIXEL_DENSITY, srcH * PIXEL_DENSITY)
       ctx.restore()
@@ -133,12 +179,21 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       const displayScale = source.displayScale
       const outW = isRotated90 ? raw.height : raw.width
       const outH = isRotated90 ? raw.width : raw.height
-      canvas.width = outW
-      canvas.height = outH
-      canvas.style.width = Math.round(outW * displayScale) + 'px'
-      canvas.style.height = Math.round(outH * displayScale) + 'px'
+      const fullW = Math.round(outW * displayScale), fullH = Math.round(outH * displayScale)
+      const cr = resolveCropRect(croppingRef.current ? null : cropRef.current, fullW, fullH)
+      const drawW = cr ? cr.w : fullW, drawH = cr ? cr.h : fullH
+      const offX = cr ? cr.x : 0, offY = cr ? cr.y : 0
+      const rawPerDisp = outW / fullW // raw canvas px per display px
+      fpFullDimsRef.current = { w: fullW, h: fullH }
+      fpOffsetRef.current = { x: offX, y: offY }
+      canvas.width = Math.max(1, Math.round(drawW * rawPerDisp))
+      canvas.height = Math.max(1, Math.round(drawH * rawPerDisp))
+      canvas.style.width = drawW + 'px'
+      canvas.style.height = drawH + 'px'
+      canvas.style.left = offX + 'px'
+      canvas.style.top = offY + 'px'
       ctx.save()
-      ctx.translate(canvas.width / 2, canvas.height / 2)
+      ctx.translate(outW / 2 - offX * rawPerDisp, outH / 2 - offY * rawPerDisp)
       ctx.rotate((rotNorm * Math.PI) / 180)
       ctx.drawImage(raw, -raw.width / 2, -raw.height / 2)
       ctx.restore()
@@ -259,6 +314,16 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floorPlanRotation])
+
+  // Redraw when the crop window changes, or when crop-edit mode turns on or
+  // off (edit mode temporarily shows the whole sheet so the box can be
+  // dragged larger than the current crop).
+  const cropKey = cropping
+    ? 'editing'
+    : (floorPlanCrop ? `${floorPlanCrop.x},${floorPlanCrop.y},${floorPlanCrop.w},${floorPlanCrop.h}` : 'none')
+  useEffect(() => {
+    if (loadedSourceRef.current) drawFloorPlanAtRotation(floorPlanRotation)
+  }, [cropKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Blend between red (weak) -> yellow (mid) -> green (strong) based on
   // a 0-1 normalized signal strength value.
@@ -471,6 +536,15 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       return
     }
 
+    // Crop mode - click and drag a box around the part of the plan to keep
+    if (cropping && e.button === 0) {
+      const { x, y } = toCanvas(e.clientX, e.clientY)
+      isCroppingDrag.current = true
+      cropStartRef.current = { x, y }
+      setCropDrag({ x1: x, y1: y, x2: x, y2: y })
+      return
+    }
+
     // Measure mode — click and drag a line to read its length in feet
     if (measuring && e.button === 0) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
@@ -531,6 +605,11 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   }
 
   function handleWrapMouseMove(e) {
+    if (isCroppingDrag.current) {
+      const { x, y } = toCanvas(e.clientX, e.clientY)
+      setCropDrag({ x1: cropStartRef.current.x, y1: cropStartRef.current.y, x2: x, y2: y })
+      return
+    }
     if (isCalibratingDrag.current) {
       const { x, y } = toCanvas(e.clientX, e.clientY)
       setCalibDrag({ x1: calibStartRef.current.x, y1: calibStartRef.current.y, x2: x, y2: y })
@@ -572,6 +651,20 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   }
 
   function handleWrapMouseUp(e) {
+    if (isCroppingDrag.current) {
+      isCroppingDrag.current = false
+      const start = cropStartRef.current
+      const { x, y } = toCanvas(e.clientX, e.clientY)
+      setCropDrag(null)
+      // Keep the box inside the sheet, and ignore stray clicks / tiny drags.
+      const full = fpFullDimsRef.current
+      const x1 = Math.max(0, Math.min(start.x, x)), y1 = Math.max(0, Math.min(start.y, y))
+      const x2 = Math.min(full.w || Infinity, Math.max(start.x, x)), y2 = Math.min(full.h || Infinity, Math.max(start.y, y))
+      if (x2 - x1 >= 20 && y2 - y1 >= 20 && onCropDrag) {
+        onCropDrag({ x: Math.round(x1), y: Math.round(y1), w: Math.round(x2 - x1), h: Math.round(y2 - y1) })
+      }
+      return
+    }
     if (isMeasuringDrag.current) {
       isMeasuringDrag.current = false
       // Leave the line + reading on screen so it can actually be read;
@@ -612,6 +705,9 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
   }
 
   function handleDeviceMouseDown(e, device) {
+    // In crop mode, let the press bubble up so a crop box can be started
+    // anywhere - including right on top of a device - instead of dragging it.
+    if (cropping) return
     e.stopPropagation()
     if (mode === 'cable') {
       // Same fix as the heatmap centering above — anchor to the
@@ -681,7 +777,12 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
     const z = zoomLevel ?? zoomRef.current
     const cw = (parseFloat(canvas.style.width) || 0) * z
     const ch = (parseFloat(canvas.style.height) || 0) * z
-    return { x: Math.max(0, (wr.width - cw) / 2), y: Math.max(0, (wr.height - ch) / 2) }
+    // The canvas may be a cropped window sitting at (offset) inside the
+    // plan's coordinate space, so shift by that offset to center the window.
+    return {
+      x: Math.max(0, (wr.width - cw) / 2) - fpOffsetRef.current.x * z,
+      y: Math.max(0, (wr.height - ch) / 2) - fpOffsetRef.current.y * z,
+    }
   }
 
   function zoomOut() {
@@ -744,7 +845,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
         ref={wrapRef}
         style={{
           width: '100%', height: '100%', position: 'relative', overflow: 'hidden',
-          cursor: (calibrating || measuring) ? 'crosshair' : isPanning.current ? 'grabbing' : mode === 'select' ? 'grab' : 'crosshair',
+          cursor: (calibrating || measuring || cropping) ? 'crosshair' : isPanning.current ? 'grabbing' : mode === 'select' ? 'grab' : 'crosshair',
           background: 'repeating-linear-gradient(0deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px),repeating-linear-gradient(90deg,transparent,transparent 29px,rgba(0,0,0,0.06) 30px)'
         }}
         data-export-canvas="true"
@@ -756,7 +857,7 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
       >
         {/* Zoomable layer */}
         <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', willChange: 'transform' }}>
-          <canvas ref={fpCanvasRef} style={{ position: 'absolute', top: 0, left: 0, opacity: 0.85, pointerEvents: 'none' }} />
+          <canvas ref={fpCanvasRef} style={{ position: 'absolute', opacity: 0.85, pointerEvents: 'none' }} />
 
           {/* Cables — fully React-rendered from state */}
           <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}>
@@ -948,6 +1049,23 @@ const SurveyCanvas = forwardRef(function SurveyCanvas({
             </svg>
           </div>
         )}
+
+        {/* Crop overlay - dims everything outside the box being chosen */}
+        {cropping && (cropDrag || cropPreview) && (() => {
+          const r = cropDrag
+            ? { x: Math.min(cropDrag.x1, cropDrag.x2), y: Math.min(cropDrag.y1, cropDrag.y2), w: Math.abs(cropDrag.x2 - cropDrag.x1), h: Math.abs(cropDrag.y2 - cropDrag.y1) }
+            : cropPreview
+          return (
+            <div style={{ position: 'absolute', top: 0, left: 0, transform, transformOrigin: '0 0', pointerEvents: 'none', zIndex: 20 }}>
+              <svg style={{ overflow: 'visible', position: 'absolute', top: 0, left: 0 }}>
+                <path fillRule="evenodd" fill="rgba(0,0,0,0.5)"
+                  d={`M -100000 -100000 H 100000 V 100000 H -100000 Z M ${r.x} ${r.y} h ${r.w} v ${r.h} h ${-r.w} Z`} />
+                <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="none"
+                  stroke="#378ADD" strokeWidth={2 / zoom} strokeDasharray={`${6 / zoom},${4 / zoom}`} />
+              </svg>
+            </div>
+          )
+        })()}
 
         {/* Measurement overlay — line + live distance reading, stays
             visible after mouseup so it can actually be read */}

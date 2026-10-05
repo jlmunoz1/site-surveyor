@@ -35,6 +35,18 @@ const POINT_COLORS = ['#E23D3D', '#378ADD', '#1D9E75', '#BA7517', '#8B5CF6', '#D
 
 const PIXEL_DENSITY = 2 // matches SurveyCanvas's crisp-render factor
 
+// Same clamping rules the editor canvas uses for a saved crop window.
+function normalizeCropRect(crop, fullW, fullH) {
+  if (!crop || !(crop.w > 0) || !(crop.h > 0)) return null
+  const x = Math.max(0, Math.min(crop.x || 0, fullW - 1))
+  const y = Math.max(0, Math.min(crop.y || 0, fullH - 1))
+  const w = Math.min(crop.w, fullW - x)
+  const h = Math.min(crop.h, fullH - y)
+  if (w < 8 || h < 8) return null
+  if (x <= 0 && y <= 0 && w >= fullW && h >= fullH) return null
+  return { x, y, w, h }
+}
+
 export default function GeoReference() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -60,6 +72,7 @@ export default function GeoReference() {
   // width/height. Control points and MDF/IDF pins are only correct if
   // they're measured in this space.
   const [displayDims, setDisplayDims] = useState(null) // { w, h }
+  const [overlayRect, setOverlayRect] = useState(null) // { x, y, w, h } - the part of the sheet shown on the map (the crop window, or the whole plan)
   const [overlayImageSrc, setOverlayImageSrc] = useState(null) // dataURL fed to the map overlay
   const [planLoadError, setPlanLoadError] = useState('')
 
@@ -225,7 +238,22 @@ export default function GeoReference() {
     ctx.restore()
 
     setDisplayDims({ w: displayW, h: displayH })
-    setOverlayImageSrc(canvas.toDataURL('image/png'))
+    const crop = normalizeCropRect(survey?.floor_plan_crop, displayW, displayH)
+    if (crop) {
+      // The map overlay shows only the trimmed part of the sheet, so what
+      // lands on the satellite view matches the cropped plan in the editor.
+      // Control points are still placed against the full sheet on the left,
+      // and the fitted transform covers the whole sheet either way.
+      const off = document.createElement('canvas')
+      off.width = Math.round(crop.w * PIXEL_DENSITY)
+      off.height = Math.round(crop.h * PIXEL_DENSITY)
+      off.getContext('2d').drawImage(canvas, crop.x * PIXEL_DENSITY, crop.y * PIXEL_DENSITY, crop.w * PIXEL_DENSITY, crop.h * PIXEL_DENSITY, 0, 0, off.width, off.height)
+      setOverlayRect(crop)
+      setOverlayImageSrc(off.toDataURL('image/png'))
+    } else {
+      setOverlayRect({ x: 0, y: 0, w: displayW, h: displayH })
+      setOverlayImageSrc(canvas.toDataURL('image/png'))
+    }
   }
 
   // ── Map setup ────────────────────────────────────────────────────────
@@ -290,9 +318,9 @@ export default function GeoReference() {
   // ── Transform: recomputed any time the control points change ───────
   const transform = useMemo(() => (points.length >= 2 ? fitGeoTransform(points) : null), [points])
   const corners = useMemo(() => {
-    if (!transform || !displayDims) return null
-    return computeCorners(transform, displayDims.w, displayDims.h)
-  }, [transform, displayDims])
+    if (!transform || !overlayRect) return null
+    return computeCorners(transform, overlayRect.w, overlayRect.h, overlayRect.x, overlayRect.y)
+  }, [transform, overlayRect])
 
   // Real-world scale derived from the satellite-verified control
   // points, in the same px/ft unit the main editor uses for coverage

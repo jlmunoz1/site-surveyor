@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { getProfiles, getSurveys, getProjects, getEnterprises, renameEnterprise, deleteEnterprise, mergeEnterprises, setUserAdmin, setUserContractor, setUserAccessExpiration, sendPasswordReset, signOut } from '../lib/supabase'
+import { getProfiles, getSurveys, getProjects, getEnterprises, renameEnterprise, deleteEnterprise, mergeEnterprises, setUserAdmin, setUserContractor, setUserAccessExpiration, sendPasswordReset, adminInviteUser, adminUpdateUser, signOut } from '../lib/supabase'
 
 export default function AdminPage() {
   const { user } = useAuth()
@@ -12,6 +12,18 @@ export default function AdminPage() {
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState(null)
   const [resetStatus, setResetStatus] = useState({}) // id -> 'sending' | 'sent' | error message
+
+  // Invite a new user
+  const [showInvite, setShowInvite] = useState(false)
+  const [inviteForm, setInviteForm] = useState({ email: '', fullName: '', isAdmin: false, isContractor: false, expiresOn: '' })
+  const [inviting, setInviting] = useState(false)
+  const [inviteResult, setInviteResult] = useState(null) // { ok, message }
+
+  // Edit an existing user
+  const [editingUser, setEditingUser] = useState(null)
+  const [editForm, setEditForm] = useState(null)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editError, setEditError] = useState('')
 
   // Enterprise management — separate from the per-user table above.
   // getEnterprises() already returns every enterprise across all users
@@ -106,6 +118,82 @@ export default function AdminPage() {
     setTimeout(() => setResetStatus(s => ({ ...s, [u.id]: null })), 4000)
   }
 
+  // ── Invite / edit users ─────────────────────────────────────────────
+  // <input type="date"> speaks YYYY-MM-DD in local time; the database wants
+  // a timestamp. Access ends at the END of the chosen day, so "ends on
+  // Friday" really does include all of Friday.
+  function todayInput() { return new Date().toLocaleDateString('en-CA') }
+  function dateInputToIso(v) { return v ? new Date(v + 'T23:59:59').toISOString() : null }
+  function isoToDateInput(iso) { return iso ? new Date(iso).toLocaleDateString('en-CA') : '' }
+
+  function openInvite() {
+    setInviteForm({ email: '', fullName: '', isAdmin: false, isContractor: false, expiresOn: '' })
+    setInviteResult(null)
+    setShowInvite(true)
+  }
+  async function handleInvite(e) {
+    e.preventDefault()
+    setInviting(true); setInviteResult(null)
+    const res = await adminInviteUser({
+      email: inviteForm.email,
+      fullName: inviteForm.fullName,
+      isAdmin: inviteForm.isAdmin,
+      isContractor: inviteForm.isAdmin ? false : inviteForm.isContractor,
+      accessExpiresAt: dateInputToIso(inviteForm.expiresOn),
+    })
+    setInviting(false)
+    if (res.error) { setInviteResult({ ok: false, message: res.error }); return }
+    if (res.ok === false && res.reason === 'already_exists') {
+      setInviteResult({ ok: false, message: 'That email already has an account. Find them in the list and use Edit to change their role, scope or access.' })
+      return
+    }
+    setInviteResult({ ok: true, message: `Invite sent to ${inviteForm.email.trim().toLowerCase()}.${res.warning ? ' ' + res.warning : ''}` })
+    // Clear who was just invited but keep role / scope / access limit, so
+    // inviting a batch of similar people is quick.
+    setInviteForm(f => ({ ...f, email: '', fullName: '' }))
+    loadAll()
+  }
+
+  function openEdit(u) {
+    setEditingUser(u)
+    setEditForm({
+      fullName: u.full_name || '',
+      email: u.email || '',
+      isAdmin: !!u.is_admin,
+      isContractor: !!u.is_contractor,
+      expiresOn: isoToDateInput(u.access_expires_at),
+    })
+    setEditError('')
+  }
+  function closeEdit() {
+    if (savingEdit) return
+    setEditingUser(null); setEditForm(null)
+  }
+  async function handleSaveEdit(e) {
+    e.preventDefault()
+    if (!editingUser || !editForm) return
+    const isSelf = editingUser.id === user.id
+    setSavingEdit(true); setEditError('')
+    // Editing yourself only ever changes your name - role, scope, access
+    // and email are locked for your own account (the server enforces this too).
+    const payload = isSelf
+      ? { userId: editingUser.id, fullName: editForm.fullName }
+      : {
+          userId: editingUser.id,
+          fullName: editForm.fullName,
+          email: editForm.email,
+          isAdmin: editForm.isAdmin,
+          isContractor: editForm.isAdmin ? false : editForm.isContractor,
+          accessExpiresAt: dateInputToIso(editForm.expiresOn),
+        }
+    const res = await adminUpdateUser(payload)
+    setSavingEdit(false)
+    if (res.error) { setEditError(res.error); return }
+    setEditingUser(null); setEditForm(null)
+    await loadAll()
+    if (res.warning) setError(res.warning)
+  }
+
   async function handleSignOut() {
     await signOut(); navigate('/')
   }
@@ -171,11 +259,18 @@ export default function AdminPage() {
         </div>
       </nav>
 
-      <div style={{ maxWidth: 1060, margin: '0 auto', padding: '32px 24px' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a18', margin: '0 0 4px' }}>Registered users</h1>
-        <p style={{ fontSize: 13, color: '#888', margin: '0 0 24px' }}>
-          {users.length} account{users.length !== 1 ? 's' : ''} — staff and contractors who have signed up.
-        </p>
+      <div style={{ maxWidth: 1180, margin: '0 auto', padding: '32px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginBottom: 24 }}>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a18', margin: '0 0 4px' }}>Registered users</h1>
+            <p style={{ fontSize: 13, color: '#888', margin: 0 }}>
+              {users.length} account{users.length !== 1 ? 's' : ''} — staff and contractors who have signed up.
+            </p>
+          </div>
+          <button onClick={openInvite} style={primaryBtn}>
+            <i className="ti ti-user-plus" style={{ marginRight: 5 }} /> Invite user
+          </button>
+        </div>
 
         {error && <p style={{ fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '8px 12px', borderRadius: 6, marginBottom: 16 }}>{error}</p>}
 
@@ -183,7 +278,7 @@ export default function AdminPage() {
           <div style={{ textAlign: 'center', padding: 48, color: '#888', fontSize: 13 }}>Loading…</div>
         ) : (
           <div style={{ background: '#fff', border: '0.5px solid #e0dfd8', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px 56px', gap: 8, padding: '10px 16px', background: '#f8f8f6', borderBottom: '0.5px solid #e0dfd8', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>
               <span>Name</span>
               <span>Email</span>
               <span>Joined</span>
@@ -193,6 +288,7 @@ export default function AdminPage() {
               <span>Scope</span>
               <span>Access</span>
               <span>Password</span>
+              <span></span>
             </div>
             {users.map(u => {
               const status = resetStatus[u.id]
@@ -202,7 +298,7 @@ export default function AdminPage() {
               const exp = u.access_expires_at ? new Date(u.access_expires_at) : null
               const isExpired = exp && exp <= new Date()
               return (
-                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 85px 60px 60px 95px 100px 130px 130px 56px', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid #f0efea', alignItems: 'center', fontSize: 13 }}>
                   <span style={{ color: '#1a1a18', fontWeight: 500 }}>
                     {u.full_name || '—'}{u.id === user.id && <span style={{ color: '#888', fontWeight: 400 }}> (you)</span>}
                   </span>
@@ -270,6 +366,10 @@ export default function AdminPage() {
                     }}
                   >
                     {isSending ? 'Sending…' : isSent ? 'Email sent ✓' : isErr ? 'Failed — retry' : 'Reset password'}
+                  </button>
+                  <button onClick={() => openEdit(u)} title="Edit name, email, role, scope and access"
+                    style={{ padding: '5px 10px', fontSize: 11, fontWeight: 500, borderRadius: 6, cursor: 'pointer', border: '0.5px solid #ccc', background: '#fff', color: '#444' }}>
+                    Edit
                   </button>
                 </div>
               )
@@ -359,9 +459,159 @@ export default function AdminPage() {
           </div>
         )}
       </div>
+
+      {/* ── Invite user ── */}
+      {showInvite && (
+        <div style={overlayStyle} onMouseDown={e => { if (e.target === e.currentTarget && !inviting) setShowInvite(false) }}>
+          <form onSubmit={handleInvite} style={modalCard}>
+            <h3 style={modalTitle}>Invite a user</h3>
+            <p style={modalHelp}>
+              They get an email to set a password and sign in. The role, scope and access limit you pick here are applied the moment they're invited.
+            </p>
+
+            {inviteResult && (
+              <div style={{
+                fontSize: 12, padding: '8px 12px', borderRadius: 6, marginBottom: 14,
+                background: inviteResult.ok ? '#E1F5EE' : '#FCEBEB', color: inviteResult.ok ? '#0F6E56' : '#A32D2D',
+              }}>{inviteResult.message}</div>
+            )}
+
+            <label style={fieldLabel}>Email</label>
+            <input type="email" required autoFocus value={inviteForm.email} placeholder="name@company.com"
+              onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))} style={fieldInput} />
+
+            <label style={fieldLabel}>Full name <span style={{ color: '#aaa', fontWeight: 400 }}>(optional)</span></label>
+            <input type="text" value={inviteForm.fullName} placeholder="Jane Smith"
+              onChange={e => setInviteForm(f => ({ ...f, fullName: e.target.value }))} style={fieldInput} />
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label style={fieldLabel}>Role</label>
+                <select value={inviteForm.isAdmin ? 'admin' : 'staff'} style={fieldInput}
+                  onChange={e => setInviteForm(f => ({ ...f, isAdmin: e.target.value === 'admin', isContractor: e.target.value === 'admin' ? false : f.isContractor }))}>
+                  <option value="staff">Staff</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={fieldLabel}>Scope</label>
+                <select value={inviteForm.isAdmin ? 'full' : inviteForm.isContractor ? 'scoped' : 'full'} style={fieldInput}
+                  disabled={inviteForm.isAdmin}
+                  onChange={e => setInviteForm(f => ({ ...f, isContractor: e.target.value === 'scoped' }))}>
+                  <option value="full">Full org</option>
+                  <option value="scoped">Scoped (contractor)</option>
+                </select>
+              </div>
+            </div>
+            <p style={{ ...modalHelp, margin: '-6px 0 14px' }}>
+              {inviteForm.isAdmin
+                ? 'Admins always see the whole org.'
+                : inviteForm.isContractor
+                  ? 'Scoped users only see projects they own or that are shared with them.'
+                  : 'Full-org users see every project.'}
+            </p>
+
+            <label style={fieldLabel}>Access ends <span style={{ color: '#aaa', fontWeight: 400 }}>(optional)</span></label>
+            <input type="date" min={todayInput()} value={inviteForm.expiresOn} style={fieldInput}
+              onChange={e => setInviteForm(f => ({ ...f, expiresOn: e.target.value }))} />
+            <p style={{ ...modalHelp, margin: '-6px 0 18px' }}>Leave blank for no limit. Handy for contractors working a fixed engagement.</p>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => setShowInvite(false)} disabled={inviting} style={ghostBtn}>
+                {inviteResult?.ok ? 'Done' : 'Cancel'}
+              </button>
+              <button type="submit" disabled={inviting || !inviteForm.email.trim()} style={{ ...primaryBtn, opacity: inviting ? 0.6 : 1 }}>
+                {inviting ? 'Sending…' : inviteResult?.ok ? 'Invite another' : 'Send invite'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ── Edit user ── */}
+      {editingUser && editForm && (() => {
+        const isSelf = editingUser.id === user.id
+        return (
+          <div style={overlayStyle} onMouseDown={e => { if (e.target === e.currentTarget) closeEdit() }}>
+            <form onSubmit={handleSaveEdit} style={modalCard}>
+              <h3 style={modalTitle}>Edit user{isSelf ? ' (you)' : ''}</h3>
+              <p style={modalHelp}>
+                {isSelf
+                  ? "You can change your own name here. Your role, scope, access and email are locked so you can't lock yourself out."
+                  : `Editing ${editingUser.email || 'this account'}.`}
+              </p>
+
+              {editError && (
+                <div style={{ fontSize: 12, padding: '8px 12px', borderRadius: 6, marginBottom: 14, background: '#FCEBEB', color: '#A32D2D' }}>{editError}</div>
+              )}
+
+              <label style={fieldLabel}>Full name</label>
+              <input type="text" autoFocus value={editForm.fullName}
+                onChange={e => setEditForm(f => ({ ...f, fullName: e.target.value }))} style={fieldInput} />
+
+              <label style={fieldLabel}>Email</label>
+              <input type="email" required value={editForm.email} disabled={isSelf}
+                onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
+                style={{ ...fieldInput, opacity: isSelf ? 0.55 : 1 }} />
+              {!isSelf && (
+                <p style={{ ...modalHelp, margin: '-6px 0 14px' }}>
+                  Changing this updates the address they sign in with, right away, and keeps any projects they were invited to attached.
+                </p>
+              )}
+
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={fieldLabel}>Role</label>
+                  <select value={editForm.isAdmin ? 'admin' : 'staff'} disabled={isSelf}
+                    style={{ ...fieldInput, opacity: isSelf ? 0.55 : 1 }}
+                    onChange={e => setEditForm(f => ({ ...f, isAdmin: e.target.value === 'admin', isContractor: e.target.value === 'admin' ? false : f.isContractor }))}>
+                    <option value="staff">Staff</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={fieldLabel}>Scope</label>
+                  <select value={editForm.isAdmin ? 'full' : editForm.isContractor ? 'scoped' : 'full'}
+                    disabled={isSelf || editForm.isAdmin}
+                    style={{ ...fieldInput, opacity: (isSelf || editForm.isAdmin) ? 0.55 : 1 }}
+                    onChange={e => setEditForm(f => ({ ...f, isContractor: e.target.value === 'scoped' }))}>
+                    <option value="full">Full org</option>
+                    <option value="scoped">Scoped (contractor)</option>
+                  </select>
+                </div>
+              </div>
+
+              <label style={fieldLabel}>Access ends</label>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                <input type="date" value={editForm.expiresOn} disabled={isSelf}
+                  onChange={e => setEditForm(f => ({ ...f, expiresOn: e.target.value }))}
+                  style={{ ...fieldInput, marginBottom: 0, opacity: isSelf ? 0.55 : 1 }} />
+                {editForm.expiresOn && !isSelf && (
+                  <button type="button" onClick={() => setEditForm(f => ({ ...f, expiresOn: '' }))} style={{ ...ghostBtn, whiteSpace: 'nowrap' }}>No limit</button>
+                )}
+              </div>
+              <p style={{ ...modalHelp, margin: '0 0 18px' }}>Blank means no limit.</p>
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" onClick={closeEdit} disabled={savingEdit} style={ghostBtn}>Cancel</button>
+                <button type="submit" disabled={savingEdit} style={{ ...primaryBtn, opacity: savingEdit ? 0.6 : 1 }}>
+                  {savingEdit ? 'Saving…' : 'Save changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )
+      })()}
     </div>
   )
 }
 
 const ghostBtn = { padding: '6px 14px', background: '#fff', color: '#444', border: '0.5px solid #ccc', borderRadius: 7, fontSize: 12, cursor: 'pointer' }
 const tinyBtn = { padding: '2px 6px', fontSize: 10, border: '0.5px solid #ccc', borderRadius: 4, background: '#fff', color: '#666', cursor: 'pointer' }
+const primaryBtn = { padding: '8px 16px', background: '#1a1a18', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }
+const overlayStyle = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 16 }
+const modalCard = { background: '#fff', borderRadius: 12, padding: 24, width: 440, maxWidth: '100%', maxHeight: '92vh', overflow: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }
+const modalTitle = { margin: '0 0 6px', fontSize: 17, fontWeight: 500, color: '#1a1a18' }
+const modalHelp = { fontSize: 12, color: '#888', lineHeight: 1.5, margin: '0 0 16px' }
+const fieldLabel = { display: 'block', fontSize: 12, fontWeight: 500, color: '#444', marginBottom: 5 }
+const fieldInput = { width: '100%', boxSizing: 'border-box', padding: '8px 10px', fontSize: 13, border: '0.5px solid #ccc', borderRadius: 7, marginBottom: 14, background: '#fff', color: '#1a1a18', outline: 'none' }
